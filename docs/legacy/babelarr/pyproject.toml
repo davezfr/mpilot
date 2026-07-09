@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "babelarr"
+version = "0.1.0"
+description = "Standalone subtitle translation and sidecar automation for media libraries."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Babelarr contributors" }]
+dependencies = []
+keywords = ["subtitles", "translation", "plex", "media", "automation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/davezfr/babelarr"
+Issues = "https://github.com/davezfr/babelarr/issues"
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+
+[project.scripts]
+babelarr = "babelarr.cli:main"
+babelarr-mcp = "babelarr.mcp_server:main"
+babelarr-runtime = "media_workflow_runtime.cli:main"
+babelarr-runtime-mcp = "media_workflow_runtime.mcp_server:main"
+media-subtitle-translator = "babelarr.cli:main"
+mst-mcp = "babelarr.mcp_server:main"
+media-workflow-runtime = "media_workflow_runtime.cli:main"
+mwr-mcp = "media_workflow_runtime.mcp_server:main"
+
+[tool.setuptools.packages.find]
+include = ["babelarr*", "media_subtitle_translator*", "media_workflow_runtime*"]

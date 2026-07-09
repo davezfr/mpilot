@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+import os
+from typing import Mapping, Optional
+
+
+_EXACT_ALIASES: dict[str, tuple[str, ...]] = {
+    "PROWLARR_URL": ("MPILOT_PROWLARR_URL", "MPILOT_ACQUISITION_PROWLARR_URL"),
+    "PROWLARR_DOWNLOAD_URL": ("MPILOT_PROWLARR_DOWNLOAD_URL", "MPILOT_ACQUISITION_PROWLARR_DOWNLOAD_URL"),
+    "PROWLARR_API_KEY": ("MPILOT_PROWLARR_API_KEY", "MPILOT_ACQUISITION_PROWLARR_API_KEY"),
+    "PROWLARR_PRIMARY_INDEXER_IDS": ("MPILOT_PROWLARR_PRIMARY_INDEXER_IDS", "MPILOT_ACQUISITION_PROWLARR_PRIMARY_INDEXER_IDS"),
+    "PROWLARR_FALLBACK_INDEXER_IDS": ("MPILOT_PROWLARR_FALLBACK_INDEXER_IDS", "MPILOT_ACQUISITION_PROWLARR_FALLBACK_INDEXER_IDS"),
+    "QBIT_URL": ("MPILOT_QBIT_URL", "MPILOT_ACQUISITION_QBIT_URL"),
+    "QBIT_USERNAME": ("MPILOT_QBIT_USERNAME", "MPILOT_ACQUISITION_QBIT_USERNAME"),
+    "QBIT_PASSWORD": ("MPILOT_QBIT_PASSWORD", "MPILOT_ACQUISITION_QBIT_PASSWORD"),
+    "REQUEST_TIMEOUT_SECONDS": ("MPILOT_ACQUISITION_REQUEST_TIMEOUT_SECONDS",),
+    "QBITLARR_HERMES_BIN": ("MPILOT_HERMES_BIN", "MPILOT_ACQUISITION_HERMES_BIN"),
+    "QBITLARR_HERMES_PROFILE": ("MPILOT_HERMES_PROFILE", "MPILOT_ACQUISITION_HERMES_PROFILE"),
+    "QBITLARR_HERMES_ENV_PATH": ("MPILOT_HERMES_ENV_PATH", "MPILOT_ACQUISITION_HERMES_ENV_PATH"),
+    "QBITLARR_HERMES_SEND_TIMEOUT_SECONDS": (
+        "MPILOT_HERMES_SEND_TIMEOUT_SECONDS",
+        "MPILOT_ACQUISITION_HERMES_SEND_TIMEOUT_SECONDS",
+    ),
+    "QBITLARR_TELEGRAM_BOT_TOKEN": ("MPILOT_TELEGRAM_BOT_TOKEN", "MPILOT_ACQUISITION_TELEGRAM_BOT_TOKEN"),
+}
+
+
+def acquisition_env_aliases(name: str) -> list[str]:
+    exact = _EXACT_ALIASES.get(name)
+    if exact is not None:
+        return list(exact)
+    if name.startswith("QBITLARR_"):
+        return ["MPILOT_ACQUISITION_" + name.removeprefix("QBITLARR_")]
+    return []
+
+
+def env_first(
+    *names: str,
+    default: Optional[str] = None,
+    env: Mapping[str, str] | None = None,
+) -> Optional[str]:
+    environment = env if env is not None else os.environ
+    for name in names:
+        for env_name in acquisition_env_aliases(name) + [name]:
+            value = environment.get(env_name)
+            if value is not None:
+                return value
+    return default

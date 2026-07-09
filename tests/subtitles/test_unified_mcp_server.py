@@ -1,0 +1,297 @@
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+import types
+import unittest
+from unittest.mock import patch
+
+from mpilot.mcp import server as unified
+from mpilot.runtime import RuntimeStoreError
+
+
+class FakeFastMCP:
+    def __init__(self, name, instructions=None):
+        self.name = name
+        self.instructions = instructions
+        self.tool_names = []
+        self.tool_docs = {}
+
+    def tool(self):
+        def decorator(func):
+            self.tool_names.append(func.__name__)
+            self.tool_docs[func.__name__] = func.__doc__ or ""
+            return func
+
+        return decorator
+
+
+class FakeNotifier:
+    class Store:
+        def pending_watches(self):
+            return []
+
+    def __init__(self):
+        self.store = self.Store()
+        self.start_count = 0
+        self.register_calls = []
+
+    async def register_watch(self, **kwargs):
+        self.register_calls.append(kwargs)
+        return {"info_hash": kwargs["info_hash"], "notification_target": kwargs["notification_target"]}
+
+    def start(self):
+        self.start_count += 1
+        return None
+
+
+class FakeQbitlarrClient:
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = []
+
+    async def handle(self, **kwargs):
+        self.calls.append(kwargs)
+        return dict(self.payload)
+
+
+class UnifiedMcpServerTests(unittest.TestCase):
+    def test_create_mcp_server_registers_full_tool_union_when_configured(self):
+        server = _create_server_with_env(
+            {
+                "QBITLARR_API_URL": "http://127.0.0.1:1",
+                "PLEX_BASE_URL": "http://plex.test:32400",
+                "PLEX_TOKEN": "token",
+            }
+        )
+
+        self.assertEqual(server.name, "mpilot")
+        self.assertTrue(
+            {
+                "acquisition_handle",
+                "acquisition_download",
+                "job_create",
+                "job_start",
+                "plex_search",
+                "subtitle_plan",
+                "record_acquisition_download_with_subtitle_intent",
+                "claim_ready_subtitle_job_create_video_actions",
+                "record_subtitle_job_created",
+                "record_subtitle_job_status",
+                "queue_status",
+                "media_request",
+            }.issubset(set(server.tool_names))
+        )
+        self.assertNotIn("claim_ready_babelarr_job_create_video_actions", server.tool_names)
+        self.assertNotIn("record_babelarr_job_created", server.tool_names)
+        self.assertNotIn("record_babelarr_job_status", server.tool_names)
+        self.assertNotIn("qbitlarr_handle", server.tool_names)
+        self.assertNotIn("qbitlarr_download", server.tool_names)
+        self.assertNotIn("record_qbitlarr_download_with_subtitle_intent", server.tool_names)
+        self.assertIn("agent_clarify.display_table", server.tool_docs["acquisition_handle"])
+        self.assertIn("acquisition_download", server.tool_docs["acquisition_handle"])
+        self.assertIn("rendered_status", server.tool_docs["acquisition_download"])
+        self.assertIn("requester_id is required", server.tool_docs["acquisition_delete_download"])
+
+    def test_create_mcp_server_can_mount_download_tools_without_subtitle_tools(self):
+        server = _create_server_with_env({"QBITLARR_API_URL": "http://127.0.0.1:1"})
+
+        self.assertIn("acquisition_handle", server.tool_names)
+        self.assertIn("media_request", server.tool_names)
+        self.assertIn("queue_status", server.tool_names)
+        self.assertNotIn("job_create", server.tool_names)
+        self.assertNotIn("plex_search", server.tool_names)
+
+    def test_create_mcp_server_can_mount_subtitle_tools_without_download_tools(self):
+        server = _create_server_with_env({"PLEX_BASE_URL": "http://plex.test:32400", "PLEX_TOKEN": "token"})
+
+        self.assertIn("job_create", server.tool_names)
+        self.assertIn("subtitle_plan", server.tool_names)
+        self.assertIn("queue_status", server.tool_names)
+        self.assertNotIn("media_request", server.tool_names)
+        self.assertNotIn("acquisition_handle", server.tool_names)
+
+    def test_media_request_without_subtitles_is_qbitlarr_handle_passthrough(self):
+        client = FakeQbitlarrClient(
+            {
+                "status": "success",
+                "action": "auto_download",
+                "title": "Example Movie",
+                "download_status": {"hash": "abc123", "name": "Example.Movie.mkv", "progress": 0.25},
+            }
+        )
+
+        with patch.object(unified, "get_qbitlarr_client", return_value=client):
+            payload = asyncio.run(unified.media_request("Example Movie", requester_id="user-123", mode="auto"))
+
+        self.assertEqual(payload["action"], "auto_download")
+        self.assertNotIn("subtitle_intent", payload)
+        self.assertEqual(client.calls[0]["user_message"], "Example Movie")
+        self.assertEqual(client.calls[0]["user_id"], "user-123")
+        self.assertEqual(client.calls[0]["mode"], "auto")
+
+    def test_media_request_records_download_and_subtitle_intent(self):
+        client = FakeQbitlarrClient(
+            {
+                "status": "success",
+                "action": "auto_download",
+                "title": "Example Movie",
+                "imdb_id": "tt1234567",
+                "media_type": "movie",
+                "download_status": {
+                    "hash": "abc123",
+                    "name": "Example.Movie.mkv",
+                    "progress": 0.25,
+                    "content_path": None,
+                },
+            }
+        )
+        calls = []
+
+        def fake_record(**kwargs):
+            calls.append(kwargs)
+            return {"workflow_id": "workflow_123", "tasks": [{"task_type": "download_media"}]}
+
+        with patch.object(unified, "get_qbitlarr_client", return_value=client), patch.object(
+            unified.runtime_tools,
+            "record_qbitlarr_download_with_subtitle_intent",
+            side_effect=fake_record,
+        ):
+            payload = asyncio.run(
+                unified.media_request(
+                    "Example Movie",
+                    requester_id="user-123",
+                    subtitle_target_language="zh",
+                    subtitle_source_language="en",
+                    output_mode="bilingual-ass",
+                    mode="auto",
+                )
+            )
+
+        self.assertEqual(payload["subtitle_intent"]["status"], "registered")
+        self.assertEqual(payload["subtitle_intent"]["workflow_id"], "workflow_123")
+        self.assertEqual(calls[0]["requester_id"], "user-123")
+        self.assertEqual(calls[0]["info_hash"], "abc123")
+        self.assertEqual(calls[0]["target_language"], "zh")
+        self.assertEqual(calls[0]["output_mode"], "bilingual-ass")
+        self.assertEqual(calls[0]["imdb_id"], "tt1234567")
+
+    def test_media_request_carries_subtitle_intent_through_clarify_payload(self):
+        client = FakeQbitlarrClient(
+            {
+                "status": "success",
+                "action": "show_results",
+                "message": "Choose one",
+                "results": [
+                    {
+                        "index": 1,
+                        "title": "Example.2026.1080p.WEB-DL.H.264-GRP",
+                        "quality": "1080p WEB-DL H.264",
+                        "label": "WEB-DL H.264",
+                        "seeders": 50,
+                        "size": 1_000_000_000,
+                        "download_link": "https://example.test/1.torrent",
+                    }
+                ],
+            }
+        )
+
+        with patch.object(unified, "get_qbitlarr_client", return_value=client):
+            payload = asyncio.run(
+                unified.media_request(
+                    "Example Movie",
+                    requester_id="user-123",
+                    subtitle_target_language="zh",
+                )
+            )
+
+        self.assertEqual(payload["action"], "show_results")
+        self.assertIn("agent_clarify", payload)
+        self.assertEqual(payload["subtitle_intent"]["status"], "pending_user_selection")
+        self.assertEqual(payload["subtitle_intent"]["continue_with"]["tool"], "media_request")
+        self.assertEqual(
+            payload["subtitle_intent"]["continue_with"]["arguments"]["subtitle_target_language"],
+            "zh",
+        )
+
+    def test_media_request_keeps_download_payload_when_runtime_registration_fails(self):
+        client = FakeQbitlarrClient(
+            {
+                "status": "success",
+                "action": "auto_download",
+                "title": "Example Movie",
+                "download_status": {"hash": "abc123", "progress": 0.25},
+            }
+        )
+
+        def fake_record(**_kwargs):
+            raise RuntimeStoreError("store is unavailable")
+
+        with patch.object(unified, "get_qbitlarr_client", return_value=client), patch.object(
+            unified.runtime_tools,
+            "record_qbitlarr_download_with_subtitle_intent",
+            side_effect=fake_record,
+        ):
+            payload = asyncio.run(
+                unified.media_request(
+                    "Example Movie",
+                    requester_id="user-123",
+                    subtitle_target_language="zh",
+                    mode="auto",
+                )
+            )
+
+        self.assertEqual(payload["action"], "auto_download")
+        self.assertEqual(payload["subtitle_intent"]["status"], "registration_failed")
+        self.assertEqual(payload["subtitle_intent"]["error"]["type"], "RuntimeStoreError")
+
+    def test_media_request_reuses_single_download_completion_notifier(self):
+        client = FakeQbitlarrClient(
+            {
+                "status": "success",
+                "action": "auto_download",
+                "title": "Example Movie",
+                "download_status": {"hash": "abc123", "name": "Example.Movie.mkv", "progress": 0.25},
+            }
+        )
+        notifier = FakeNotifier()
+
+        with patch.object(unified, "_download_completion_notifier_cache", None), patch.object(
+            unified,
+            "get_qbitlarr_client",
+            return_value=client,
+        ), patch.object(
+            unified.DownloadCompletionNotifier,
+            "from_env",
+            return_value=notifier,
+        ) as from_env:
+            asyncio.run(unified.media_request("Example Movie", requester_id="user-123"))
+            asyncio.run(unified.media_request("Example Movie", notification_target="telegram:123"))
+            asyncio.run(unified.media_request("Example Movie", notification_target="telegram:123"))
+
+        from_env.assert_called_once()
+        self.assertEqual(len(notifier.register_calls), 2)
+
+
+def _create_server_with_env(env):
+    fake_fastmcp_module = types.ModuleType("mcp.server.fastmcp")
+    fake_fastmcp_module.FastMCP = FakeFastMCP
+
+    with patch.dict(os.environ, env, clear=True), patch.dict(
+        sys.modules,
+        {
+            "mcp": types.ModuleType("mcp"),
+            "mcp.server": types.ModuleType("mcp.server"),
+            "mcp.server.fastmcp": fake_fastmcp_module,
+        },
+    ), patch.object(unified, "_download_completion_notifier_cache", None), patch.object(
+        unified.DownloadCompletionNotifier,
+        "from_env",
+        return_value=FakeNotifier(),
+    ):
+        return unified.create_mcp_server()
+
+
+if __name__ == "__main__":
+    unittest.main()

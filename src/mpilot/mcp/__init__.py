@@ -1,0 +1,1 @@
+"""qBitlarr MCP adapter package."""

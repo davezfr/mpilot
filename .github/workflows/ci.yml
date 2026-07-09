@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all,dev]"
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Check shared infrastructure dedupe
+        run: |
+          set -euo pipefail
+          for pattern in \
+            "def send_hermes_message" \
+            "api\\.telegram\\.org" \
+            "def _looks_like_hermes_target" \
+            "def _read_env_file_value" \
+            "def _parse_telegram_target"
+          do
+            matches=$(grep -RIn --include='*.py' "$pattern" . | grep -v './src/mpilot/core/' | grep -v './tests/' || true)
+            if [ -n "$matches" ]; then
+              echo "$matches"
+              exit 1
+            fi
+          done
+      - name: Build Docker image
+        run: docker build -f docker/Dockerfile .

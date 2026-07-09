@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mpilot"
+version = "0.1.0"
+description = "Unified media acquisition, subtitle automation, runtime, REST, CLI, and MCP tooling."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "MPilot contributors" }]
+keywords = ["media", "automation", "subtitles", "mcp", "qbittorrent", "prowlarr"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Utilities",
+]
+dependencies = [
+]
+
+[project.optional-dependencies]
+download = [
+  "fastapi==0.115.14",
+  "uvicorn[standard]==0.35.0",
+  "httpx==0.28.1",
+  "qbittorrent-api==2026.5.1",
+  "fastapi-mcp==0.4.0",
+]
+subtitles = []
+mcp = [
+  "mcp==1.26.0",
+]
+all = [
+  "fastapi==0.115.14",
+  "uvicorn[standard]==0.35.0",
+  "httpx==0.28.1",
+  "qbittorrent-api==2026.5.1",
+  "fastapi-mcp==0.4.0",
+  "mcp==1.26.0",
+]
+dev = [
+  "pytest==8.4.1",
+]
+
+[project.scripts]
+mpilot = "mpilot.cli:main"
+mpilot-mcp = "mpilot.mcp.server:main"
+mpilot-daemon = "mpilot.daemon.cli:main"
+qbitlarr = "mpilot.acquisition.cli:main"
+qbitlarr-mcp = "mpilot.mcp.legacy_qbitlarr:main"
+babelarr = "mpilot.subtitles.cli:main"
+babelarr-mcp = "mpilot.subtitles.mcp_server:main"
+babelarr-runtime = "mpilot.runtime.cli:main"
+babelarr-runtime-mcp = "mpilot.runtime.mcp_server:main"
+media-subtitle-translator = "mpilot.subtitles.cli:main"
+media-workflow-runtime = "mpilot.runtime.cli:main"
+mst-mcp = "mpilot.subtitles.mcp_server:main"
+mwr-mcp = "mpilot.runtime.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = [
+  "mpilot*",
+  "app*",
+  "mcp_server*",
+  "babelarr*",
+  "media_workflow_runtime*",
+  "media_subtitle_translator*",
+]
+exclude = ["tests*", "docs*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/acquisition", "tests/subtitles", "tests/core"]
+pythonpath = ["src", "."]

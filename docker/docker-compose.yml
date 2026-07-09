@@ -1,0 +1,79 @@
+services:
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:2.4.0.5397-ls149
+    container_name: qbitlarr-prowlarr
+    restart: unless-stopped
+    depends_on:
+      - flaresolverr
+    environment:
+      PUID: ${PUID:-501}
+      PGID: ${PGID:-20}
+      TZ: ${TZ:-Europe/Paris}
+    volumes:
+      - ./data/prowlarr:/config
+    ports:
+      - "9696:9696"
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.5.0
+    container_name: qbitlarr-flaresolverr
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: ${FLARESOLVERR_LOG_LEVEL:-info}
+      TZ: ${TZ:-Europe/Paris}
+    ports:
+      - "8191:8191"
+
+  qbitlarr:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: qbitlarr-api
+    restart: unless-stopped
+    depends_on:
+      - prowlarr
+    environment:
+      PROWLARR_URL: ${PROWLARR_URL:-http://prowlarr:9696}
+      PROWLARR_DOWNLOAD_URL: ${PROWLARR_DOWNLOAD_URL:-}
+      PROWLARR_API_KEY: ${PROWLARR_API_KEY:-}
+      QBIT_URL: ${QBIT_URL:-}
+      QBIT_USERNAME: ${QBIT_USERNAME:-}
+      QBIT_PASSWORD: ${QBIT_PASSWORD:-}
+      QBITLARR_API_KEY: ${QBITLARR_API_KEY:-}
+      QBITLARR_SAVE_PATH_MOVIE: ${QBITLARR_SAVE_PATH_MOVIE:-/downloads/movies}
+      QBITLARR_SAVE_PATH_MOVIE_4K: ${QBITLARR_SAVE_PATH_MOVIE_4K:-/downloads/movies-4k}
+      QBITLARR_SAVE_PATH_TV: ${QBITLARR_SAVE_PATH_TV:-/downloads/tv}
+      QBITLARR_EXTRA_SAVE_PATHS: ${QBITLARR_EXTRA_SAVE_PATHS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-30}
+      QBITLARR_QUERY_SNAPSHOT_DIR: /app/data/query-snapshots
+      QBITLARR_QUERY_SNAPSHOT_RETENTION_SECONDS: ${QBITLARR_QUERY_SNAPSHOT_RETENTION_SECONDS:-604800}
+      PROWLARR_PRIMARY_INDEXER_IDS: ${PROWLARR_PRIMARY_INDEXER_IDS:-}
+      PROWLARR_FALLBACK_INDEXER_IDS: ${PROWLARR_FALLBACK_INDEXER_IDS:-}
+      QBITLARR_PREFER_RESOLUTION: ${QBITLARR_PREFER_RESOLUTION:-1080p}
+      QBITLARR_PREFER_SOURCE: ${QBITLARR_PREFER_SOURCE:-WEB-DL}
+      QBITLARR_PREFER_CODEC: ${QBITLARR_PREFER_CODEC:-H.264}
+      QBITLARR_MIN_SEEDERS: ${QBITLARR_MIN_SEEDERS:-5}
+      QBITLARR_DEFAULT_MODE: ${QBITLARR_DEFAULT_MODE:-manual}
+      QBITLARR_MANUAL_RESULT_LIMIT: ${QBITLARR_MANUAL_RESULT_LIMIT:-4}
+      QBITLARR_CHOICE_STYLE: ${QBITLARR_CHOICE_STYLE:-hermes-default}
+      QBITLARR_CLEANUP_ENABLED: ${QBITLARR_CLEANUP_ENABLED:-false}
+      QBITLARR_CLEANUP_COMPLETED_AFTER_SECONDS: ${QBITLARR_CLEANUP_COMPLETED_AFTER_SECONDS:-259200}
+      QBITLARR_CLEANUP_INTERVAL_SECONDS: ${QBITLARR_CLEANUP_INTERVAL_SECONDS:-21600}
+      QBITLARR_CLEANUP_INCLUDE_LEGACY_REQUESTER_TAGS: ${QBITLARR_CLEANUP_INCLUDE_LEGACY_REQUESTER_TAGS:-true}
+    volumes:
+      - ./data/qbitlarr:/app/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, urllib.request; req=urllib.request.Request('http://127.0.0.1:8000/health'); key=os.getenv('QBITLARR_API_KEY'); req.add_header('X-API-Key', key) if key else None; urllib.request.urlopen(req, timeout=3).read()",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

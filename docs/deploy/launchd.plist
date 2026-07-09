@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mpilot.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/absolute/path/to/mpilot/bin/mpilot-daemon</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/absolute/path/to/mpilot</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHON</key>
+    <string>/absolute/path/to/mpilot/.venv/bin/python</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/mpilot-daemon.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/mpilot-daemon.err.log</string>
+</dict>
+</plist>
