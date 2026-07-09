@@ -26,7 +26,7 @@ line.
 class WorkflowCliTests(unittest.TestCase):
     def run_cli(self, *args, cwd=None):
         return subprocess.run(
-            [sys.executable, "-m", "babelarr", *args],
+            [sys.executable, "-m", "mpilot.subtitles", *args],
             cwd=cwd,
             text=True,
             capture_output=True,

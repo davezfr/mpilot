@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import httpx
 
-from app.services.prowlarr import search_prowlarr
-from app.models import SearchRequest
+from mpilot.acquisition.services.prowlarr import search_prowlarr
+from mpilot.acquisition.models import SearchRequest
 
 
 class FakeProwlarrResponse:
@@ -62,7 +62,7 @@ def _settings():
 
 def test_search_prowlarr_retries_once_after_read_timeout(monkeypatch):
     FlakyAsyncClient.calls = 0
-    monkeypatch.setattr("app.services.prowlarr.httpx.AsyncClient", FlakyAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.prowlarr.httpx.AsyncClient", FlakyAsyncClient)
 
     results = asyncio.run(search_prowlarr(SearchRequest(query="tt2584384"), _settings()))
 

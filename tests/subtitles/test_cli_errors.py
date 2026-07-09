@@ -5,8 +5,8 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
-from babelarr import cli as cli_module
-from babelarr.provider_policy import LowConfidenceSubtitleCandidatesError
+from mpilot.subtitles import cli as cli_module
+from mpilot.subtitles.provider_policy import LowConfidenceSubtitleCandidatesError
 
 
 class CliErrorTests(unittest.TestCase):

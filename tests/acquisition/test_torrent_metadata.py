@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
-from app.domain.torrent_metadata import parse_torrent_info_hash, parse_torrent_name
+from mpilot.acquisition.domain.torrent_metadata import parse_torrent_info_hash, parse_torrent_name
 
 
 def test_parse_torrent_name_still_returns_info_name():

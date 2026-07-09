@@ -25,8 +25,8 @@ Use these imports for new code:
 | Runtime workflow store | `mpilot.runtime` |
 | Shared helpers | `mpilot.core` |
 
-Compatibility shims for older import paths may still exist in this package to
-help migrations, but new code should not depend on them.
+Older top-level import shims are not part of the MPilot public package. Update
+new code to import from `mpilot.*` directly.
 
 ## Commands
 
@@ -41,8 +41,8 @@ Use these commands for new deployments:
 | Unified MCP server | `mpilot-mcp` |
 | Unified background daemon | `mpilot-daemon` |
 
-Old per-project launchers are migration aliases only. They are not documented
-as the primary public surface.
+Old per-project launchers are not shipped from MPilot. Replace them with the
+commands above.
 
 ## Environment Variables
 
@@ -71,23 +71,8 @@ MPilot names above.
 
 ## MCP Configuration
 
-Before MPilot, users often configured separate MCP servers:
-
-```json
-{
-  "qbitlarr": {
-    "command": "/absolute/path/to/qbitlarr/bin/qbitlarr-mcp"
-  },
-  "babelarr": {
-    "command": "/absolute/path/to/babelarr/bin/babelarr-mcp"
-  },
-  "runtime": {
-    "command": "/absolute/path/to/babelarr/bin/babelarr-runtime-mcp"
-  }
-}
-```
-
-Use one MPilot server instead:
+If your host previously configured separate acquisition, subtitle, and runtime
+MCP servers, remove those entries and use one MPilot server instead:
 
 ```json
 {

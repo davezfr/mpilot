@@ -4,24 +4,24 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from babelarr import cli as cli_module
-from babelarr.cli import build_parser, build_plex_online_subtitle_fetcher, subtitle_fetch_summary, subtitle_search_summary
-from babelarr.plex_resolver import PlexResolvedMedia
-from babelarr.provider_policy import (
+from mpilot.subtitles import cli as cli_module
+from mpilot.subtitles.cli import build_parser, build_plex_online_subtitle_fetcher, subtitle_fetch_summary, subtitle_search_summary
+from mpilot.subtitles.plex_resolver import PlexResolvedMedia
+from mpilot.subtitles.provider_policy import (
     LowConfidenceSubtitleCandidatesError,
     download_first_provider_candidate,
     provider_names_for_search,
     rank_candidates_for_download,
 )
-from babelarr.providers.base import (
+from mpilot.subtitles.providers.base import (
     DownloadedSubtitle,
     SubtitleProviderApiError,
     SubtitleProviderConfigurationError,
     SubtitleCandidate,
     SubtitleSearchRequest,
 )
-from babelarr.providers.opensubtitles import OpenSubtitlesConfig, OpenSubtitlesLoginResult, OpenSubtitlesProvider
-from babelarr.providers.subdl import SubDLConfig, SubDLProvider
+from mpilot.subtitles.providers.opensubtitles import OpenSubtitlesConfig, OpenSubtitlesLoginResult, OpenSubtitlesProvider
+from mpilot.subtitles.providers.subdl import SubDLConfig, SubDLProvider
 
 
 class FakeHttpGet:

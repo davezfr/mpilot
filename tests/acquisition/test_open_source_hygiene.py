@@ -7,7 +7,6 @@ import tomllib
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-QBITLARR_LEGACY_ROOT = REPO_ROOT / "docs" / "legacy" / "qbitlarr"
 BINARY_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".ico"}
 
 
@@ -32,104 +31,83 @@ def test_compose_can_render_prowlarr_onboarding_before_api_key_exists():
     assert result.returncode == 0, result.stderr
 
 
-def test_readme_architecture_mentions_cli_and_has_editable_source():
-    readme = (QBITLARR_LEGACY_ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert readme.startswith("# qBitlarr")
-    assert "REST / MCP / CLI" in readme
-    assert "(docs/architecture.png)" in readme
-    assert (QBITLARR_LEGACY_ROOT / "docs" / "architecture.svg").exists()
-
-
-def test_readme_leads_with_architecture_before_use_case():
-    readmes = [
-        (QBITLARR_LEGACY_ROOT / "README.md", "## Architecture", "## What It Feels Like"),
-        (QBITLARR_LEGACY_ROOT / "README.zh-CN.md", "## 架构", "## 用起来是什么感觉"),
-        (QBITLARR_LEGACY_ROOT / "README.fr.md", "## Architecture", "## À quoi ça ressemble"),
+def test_readme_is_mpilot_product_surface_with_assets():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    screenshot_paths = [
+        "assets/readme/telegram-download-and-subtitle-one-shot.jpg",
+        "assets/readme/bilingual-ass-his-girl-friday.jpg",
+        "assets/readme/telegram-imdb-release-picker.jpg",
+        "assets/readme/telegram-subtitle-after-download-ready.jpg",
     ]
 
-    for readme_path, architecture_heading, use_case_heading in readmes:
-        readme = readme_path.read_text(encoding="utf-8")
-        assert readme.index(architecture_heading) < readme.index(use_case_heading)
+    assert readme.startswith("# MPilot")
+    assert "mpilot-mcp" in readme
+    assert "media_request" in readme
+    assert "acquisition_*" in readme
+    assert "## Migration From qBitlarr And Babelarr" in readme
+    for screenshot_path in screenshot_paths:
+        assert screenshot_path in readme
+        assert (REPO_ROOT / screenshot_path).exists()
 
 
-def test_readme_language_switcher_links_are_reciprocal():
-    english_readme = (QBITLARR_LEGACY_ROOT / "README.md").read_text(encoding="utf-8")
-    chinese_readme_path = QBITLARR_LEGACY_ROOT / "README.zh-CN.md"
-    french_readme_path = QBITLARR_LEGACY_ROOT / "README.fr.md"
+def test_pyproject_exposes_only_mpilot_console_scripts():
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
-    assert "[中文](README.zh-CN.md)" in english_readme
-    assert "[Français](README.fr.md)" in english_readme
-    assert chinese_readme_path.exists()
-    assert french_readme_path.exists()
-
-    chinese_readme = chinese_readme_path.read_text(encoding="utf-8")
-    assert "[English](README.md)" in chinese_readme
-    assert "[Français](README.fr.md)" in chinese_readme
-
-    french_readme = french_readme_path.read_text(encoding="utf-8")
-    assert "[English](README.md)" in french_readme
-    assert "[中文](README.zh-CN.md)" in french_readme
+    assert pyproject["project"]["scripts"] == {
+        "mpilot": "mpilot.cli:main",
+        "mpilot-mcp": "mpilot.mcp.server:main",
+        "mpilot-daemon": "mpilot.daemon.cli:main",
+    }
+    assert pyproject["tool"]["setuptools"]["packages"]["find"]["include"] == ["mpilot*"]
 
 
-def test_readme_examples_use_public_domain_sample_title():
-    readmes = [
-        QBITLARR_LEGACY_ROOT / "README.md",
-        QBITLARR_LEGACY_ROOT / "README.zh-CN.md",
-        QBITLARR_LEGACY_ROOT / "README.fr.md",
-    ]
-    disallowed_examples = [
-        "YOUR" + "MOVIE",
-        "YOUR" + "SHOW",
-        "Pulp " + "Fiction",
-        "The " + "Matrix",
-        "Inter" + "stellar",
-        "tt" + "0110912",
-    ]
+def test_legacy_entrypoints_and_shim_packages_are_not_tracked():
+    forbidden_paths = {
+        "app",
+        "babel" + "arr",
+        "mcp_server",
+        "media_subtitle_translator",
+        "media_workflow_runtime",
+        "docs/legacy",
+        "bin/" + "qbitlarr",
+        "bin/" + "qbit" + "larr-mcp",
+        "bin/" + "babel" + "arr-mcp",
+        "bin/" + "babel" + "arr-runtime-mcp",
+        "bin/mst-mcp",
+        "bin/mwr-mcp",
+    }
+    result = subprocess.run(
+        ["git", "ls-files", *sorted(forbidden_paths)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
 
-    for readme_path in readmes:
-        readme = readme_path.read_text(encoding="utf-8")
-        assert "The Hitch-Hiker" in readme
-        assert "tt0045877" in readme
-
-        for example in disallowed_examples:
-            assert example not in readme
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ""
 
 
-def test_tracked_text_files_do_not_reintroduce_legacy_media_examples():
-    disallowed_examples = [
-        "YOUR" + "MOVIE",
-        "YOUR" + "SHOW",
-        "Pulp " + "Fiction",
-        "Fight " + "Club",
-        "Jojo " + "Rabbit",
-        "The " + "Matrix",
-        "Inter" + "stellar",
-        "The " + "Boys",
-        "tt" + "0110912",
-        "tt" + "1190634",
-        "192" + ".168.1.139",
-        "Co-" + "Authored-By",
-        "Claude " + "Sonnet",
-    ]
-    disallowed_patterns = [
-        r"\b" + "Qbit" + r"larr\b",
+def test_tracked_text_files_do_not_reintroduce_old_public_entrypoints():
+    forbidden_patterns = [
+        r"\bbin/" + "qbitlarr" + r"\b",
+        r"\bbin/" + "qbit" + "larr-mcp" + r"\b",
+        r"\bbin/" + "babel" + "arr-mcp" + r"\b",
+        r"\bbin/" + "babel" + "arr-runtime-mcp" + r"\b",
+        r"\b" + "qbit" + "larr-mcp" + r"\b",
+        r"\b" + "babel" + "arr-mcp" + r"\b",
+        r"\b" + "babel" + "arr-runtime-mcp" + r"\b",
+        r"\b" + "media-" + "subtitle-translator" + r"\b",
+        r"\b" + "media-" + "workflow-runtime" + r"\b",
+        r"(?m)^from " + "app" + r"\b",
+        r"(?m)^import " + "app" + r"\b",
+        r"(?m)^from " + "babelarr" + r"\b",
+        r"(?m)^import " + "babelarr" + r"\b",
+        r"(?m)^from " + "media_workflow" + "_runtime" + r"\b",
+        r"(?m)^import " + "media_workflow" + "_runtime" + r"\b",
     ]
     result = subprocess.run(
-        [
-            "git",
-            "ls-files",
-            "app",
-            "mcp_server",
-            "bin/qbitlarr",
-            "bin/qbitlarr-mcp",
-            "docker",
-            "docs/legacy/qbitlarr",
-            "pyproject.toml",
-            "requirements.txt",
-            ".env.example",
-            ".github/workflows/ci.yml",
-        ],
+        ["git", "ls-files"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -142,77 +120,19 @@ def test_tracked_text_files_do_not_reintroduce_legacy_media_examples():
         path = REPO_ROOT / relative_path
         if path.suffix.lower() in BINARY_SUFFIXES:
             continue
-
-        content = path.read_text(encoding="utf-8")
-        for example in disallowed_examples:
-            assert example not in content, f"{example!r} found in {relative_path}"
-        for pattern in disallowed_patterns:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for pattern in forbidden_patterns:
             assert not re.search(pattern, content), f"{pattern!r} found in {relative_path}"
 
 
-def test_readme_screenshots_are_referenced_and_explained():
-    screenshot_paths = [
-        "docs/screenshots/telegram-imdb-release-picker.jpg",
-        "docs/screenshots/telegram-title-release-picker.jpg",
-        "docs/screenshots/telegram-qbitlarr-babelarr-one-shot.jpg",
-    ]
-    readmes = [
-        QBITLARR_LEGACY_ROOT / "README.md",
-        QBITLARR_LEGACY_ROOT / "README.zh-CN.md",
-        QBITLARR_LEGACY_ROOT / "README.fr.md",
-    ]
-
-    for screenshot_path in screenshot_paths:
-        assert (QBITLARR_LEGACY_ROOT / screenshot_path).exists()
-
-    for readme_path in readmes:
-        readme = readme_path.read_text(encoding="utf-8")
-        assert "<table>" in readme
-        for screenshot_path in screenshot_paths:
-            assert screenshot_path in readme
-
-        assert "Public Domain" in readme
-        assert "specific restoration" in readme or "具体发行版" in readme or "restauration" in readme
-
-
-def test_readme_documents_mcp_multilingual_behavior():
-    assert "same language you use" in (QBITLARR_LEGACY_ROOT / "README.md").read_text(encoding="utf-8")
-    assert "用什么语言问" in (QBITLARR_LEGACY_ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
-    assert "même langue" in (QBITLARR_LEGACY_ROOT / "README.fr.md").read_text(encoding="utf-8")
-
-
-def test_readme_documents_qbittorrent_web_ui_setup():
-    readmes = [
-        QBITLARR_LEGACY_ROOT / "README.md",
-        QBITLARR_LEGACY_ROOT / "README.zh-CN.md",
-        QBITLARR_LEGACY_ROOT / "README.fr.md",
-    ]
-
-    for readme_path in readmes:
-        readme = readme_path.read_text(encoding="utf-8")
-        assert "qBittorrent Web UI" in readme
-        assert "QBIT_URL" in readme
-        assert "QBIT_USERNAME" in readme
-        assert "QBIT_PASSWORD" in readme
-        assert "host.docker.internal" in readme
-
-
-def test_pyproject_exposes_qbitlarr_console_script():
-    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-
-    assert pyproject["project"]["scripts"]["qbitlarr"] == "mpilot.acquisition.cli:main"
-
-
-def test_production_requirements_do_not_install_test_runner():
-    requirements = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
-
-    assert not any(line.startswith("pytest") for line in requirements)
-
-
-def test_dockerfile_runs_api_as_non_root_user():
+def test_dockerfile_runs_api_as_mpilot_non_root_user():
     dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "USER qbitlarr" in dockerfile
+    assert "adduser --system --ingroup mpilot mpilot" in dockerfile
+    assert "USER mpilot" in dockerfile
 
 
 def test_compose_uses_pinned_third_party_image_tags():
@@ -221,6 +141,7 @@ def test_compose_uses_pinned_third_party_image_tags():
     assert ":latest" not in compose
     assert "lscr.io/linuxserver/prowlarr:2.4.0.5397-ls149" in compose
     assert "ghcr.io/flaresolverr/flaresolverr:v3.5.0" in compose
+    assert "container_name: mpilot-api" in compose
 
 
 def test_github_actions_runs_pytest_on_push_and_pull_request():

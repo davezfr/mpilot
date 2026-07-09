@@ -1,7 +1,7 @@
 import unittest
 
-from babelarr.srt import Cue
-from babelarr.workflow import prepare_target_cues_for_output
+from mpilot.subtitles.srt import Cue
+from mpilot.subtitles.workflow import prepare_target_cues_for_output
 
 
 class WorkflowOutputTests(unittest.TestCase):

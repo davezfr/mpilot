@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import main as app_main
-from app.api.download import _download_title_from_link
-from app.main import (
+from mpilot.api import main as app_main
+from mpilot.api.download import _download_title_from_link
+from mpilot.api.main import (
     DownloadRequest,
     HandleRequest,
     SearchRequest,
@@ -19,7 +19,7 @@ from app.main import (
     normalize_download_link,
     normalize_search_results,
 )
-from app.models import TorrentStatus
+from mpilot.acquisition.models import TorrentStatus
 
 
 def test_settings_defaults_public_save_paths(monkeypatch):
@@ -357,7 +357,7 @@ def test_cleanup_loop_prunes_query_snapshots_after_download_cleanup_failure():
 
 
 def test_query_snapshot_store_prunes_old_snapshots(tmp_path):
-    from app.services.query_snapshots import QuerySnapshotStore
+    from mpilot.acquisition.services.query_snapshots import QuerySnapshotStore
 
     store = QuerySnapshotStore(str(tmp_path))
     store.create(
@@ -391,7 +391,7 @@ def test_query_snapshot_store_prunes_old_snapshots(tmp_path):
 
 
 def test_query_snapshot_store_prune_skips_invalid_timestamp_and_prunes_other_snapshots(tmp_path):
-    from app.services.query_snapshots import QuerySnapshotStore
+    from mpilot.acquisition.services.query_snapshots import QuerySnapshotStore
 
     store = QuerySnapshotStore(str(tmp_path))
     store.create(
@@ -655,9 +655,9 @@ def test_download_endpoint_passes_save_path_to_qbittorrent(monkeypatch, tmp_path
             hash="abcdef1234567890",
         )
 
-    monkeypatch.setattr("app.api.download.add_download_to_qbittorrent", fake_add_download)
+    monkeypatch.setattr("mpilot.api.download.add_download_to_qbittorrent", fake_add_download)
     monkeypatch.setattr(
-        "app.api.download.get_settings",
+        "mpilot.api.download.get_settings",
         lambda: SimpleNamespace(
             qbitlarr_save_path_movie="/downloads/movies",
             qbitlarr_save_path_movie_4k="/downloads/movies-4k",
@@ -695,10 +695,10 @@ def test_download_endpoint_infers_movie_save_path_when_save_path_is_omitted(monk
         queued["download_link"] = download_link
         queued["save_path"] = save_path
 
-    monkeypatch.setattr("app.api.download._download_title_from_link", fake_download_title_from_link)
-    monkeypatch.setattr("app.api.download.add_download_to_qbittorrent", fake_add_download)
+    monkeypatch.setattr("mpilot.api.download._download_title_from_link", fake_download_title_from_link)
+    monkeypatch.setattr("mpilot.api.download.add_download_to_qbittorrent", fake_add_download)
     monkeypatch.setattr(
-        "app.api.download.get_settings",
+        "mpilot.api.download.get_settings",
         lambda: SimpleNamespace(
             qbitlarr_save_path_movie="/downloads/movies",
             qbitlarr_save_path_movie_4k="/downloads/movies-4k",
@@ -729,10 +729,10 @@ def test_download_endpoint_infers_4k_movie_save_path_when_save_path_is_omitted(m
     async def fake_add_download(download_link, settings, *, save_path=None):
         queued["save_path"] = save_path
 
-    monkeypatch.setattr("app.api.download._download_title_from_link", fake_download_title_from_link)
-    monkeypatch.setattr("app.api.download.add_download_to_qbittorrent", fake_add_download)
+    monkeypatch.setattr("mpilot.api.download._download_title_from_link", fake_download_title_from_link)
+    monkeypatch.setattr("mpilot.api.download.add_download_to_qbittorrent", fake_add_download)
     monkeypatch.setattr(
-        "app.api.download.get_settings",
+        "mpilot.api.download.get_settings",
         lambda: SimpleNamespace(
             qbitlarr_save_path_movie="/downloads/movies",
             qbitlarr_save_path_movie_4k="/downloads/movies-4k",
@@ -760,10 +760,10 @@ def test_download_endpoint_infers_tv_save_path_when_save_path_is_omitted(monkeyp
     async def fake_add_download(download_link, settings, *, save_path=None):
         queued["save_path"] = save_path
 
-    monkeypatch.setattr("app.api.download._download_title_from_link", fake_download_title_from_link)
-    monkeypatch.setattr("app.api.download.add_download_to_qbittorrent", fake_add_download)
+    monkeypatch.setattr("mpilot.api.download._download_title_from_link", fake_download_title_from_link)
+    monkeypatch.setattr("mpilot.api.download.add_download_to_qbittorrent", fake_add_download)
     monkeypatch.setattr(
-        "app.api.download.get_settings",
+        "mpilot.api.download.get_settings",
         lambda: SimpleNamespace(
             qbitlarr_save_path_movie="/downloads/movies",
             qbitlarr_save_path_movie_4k="/downloads/movies-4k",
@@ -783,7 +783,7 @@ def test_download_endpoint_infers_tv_save_path_when_save_path_is_omitted(monkeyp
 
 
 def test_download_endpoint_uses_query_context_to_keep_manual_selection_in_tv_path(monkeypatch, tmp_path):
-    import app.api.download as download_api
+    import mpilot.api.download as download_api
 
     queued: dict[str, str | None] = {}
 
@@ -795,8 +795,8 @@ def test_download_endpoint_uses_query_context_to_keep_manual_selection_in_tv_pat
         queued["save_path"] = save_path
         queued["requester_id"] = requester_id
 
-    monkeypatch.setattr("app.api.download._download_title_from_link", fake_download_title_from_link)
-    monkeypatch.setattr("app.api.download.add_download_to_qbittorrent", fake_add_download)
+    monkeypatch.setattr("mpilot.api.download._download_title_from_link", fake_download_title_from_link)
+    monkeypatch.setattr("mpilot.api.download.add_download_to_qbittorrent", fake_add_download)
     monkeypatch.setattr(
         download_api,
         "get_settings",
@@ -809,7 +809,7 @@ def test_download_endpoint_uses_query_context_to_keep_manual_selection_in_tv_pat
         ),
     )
 
-    from app.services.query_snapshots import QuerySnapshotStore
+    from mpilot.acquisition.services.query_snapshots import QuerySnapshotStore
 
     QuerySnapshotStore(str(tmp_path)).create(
         query_id="query-tv-manual",
@@ -857,10 +857,10 @@ def test_download_endpoint_sanitizes_inferred_tv_show_folder(monkeypatch):
     async def fake_add_download(download_link, settings, *, save_path=None):
         queued["save_path"] = save_path
 
-    monkeypatch.setattr("app.api.download._download_title_from_link", fake_download_title_from_link)
-    monkeypatch.setattr("app.api.download.add_download_to_qbittorrent", fake_add_download)
+    monkeypatch.setattr("mpilot.api.download._download_title_from_link", fake_download_title_from_link)
+    monkeypatch.setattr("mpilot.api.download.add_download_to_qbittorrent", fake_add_download)
     monkeypatch.setattr(
-        "app.api.download.get_settings",
+        "mpilot.api.download.get_settings",
         lambda: SimpleNamespace(
             qbitlarr_save_path_movie="/downloads/movies",
             qbitlarr_save_path_movie_4k="/downloads/movies-4k",
@@ -894,9 +894,9 @@ def test_download_endpoint_rejects_save_path_outside_allowed_roots(monkeypatch):
     async def fake_add_download(download_link, settings, *, save_path=None, requester_id=None):
         raise AssertionError("download should not be queued")
 
-    monkeypatch.setattr("app.api.download.add_download_to_qbittorrent", fake_add_download)
+    monkeypatch.setattr("mpilot.api.download.add_download_to_qbittorrent", fake_add_download)
     monkeypatch.setattr(
-        "app.api.download.get_settings",
+        "mpilot.api.download.get_settings",
         lambda: SimpleNamespace(
             qbitlarr_save_path_movie="/downloads/movies",
             qbitlarr_save_path_movie_4k="/downloads/movies-4k",
@@ -934,9 +934,9 @@ def test_deep_health_reports_dependency_status(monkeypatch):
     async def fake_qbittorrent_health(settings):
         return {"status": "ok"}
 
-    monkeypatch.setattr("app.main.get_settings", lambda: object())
-    monkeypatch.setattr("app.main.check_prowlarr_health", fake_prowlarr_health, raising=False)
-    monkeypatch.setattr("app.main.check_qbittorrent_health", fake_qbittorrent_health, raising=False)
+    monkeypatch.setattr("mpilot.api.main.get_settings", lambda: object())
+    monkeypatch.setattr("mpilot.api.main.check_prowlarr_health", fake_prowlarr_health, raising=False)
+    monkeypatch.setattr("mpilot.api.main.check_qbittorrent_health", fake_qbittorrent_health, raising=False)
 
     client = TestClient(app)
     response = client.get("/health?deep=true")
@@ -944,7 +944,7 @@ def test_deep_health_reports_dependency_status(monkeypatch):
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "service": "qBitlarr API",
+        "service": "MPilot Acquisition API",
         "dependencies": {
             "prowlarr": {"status": "ok"},
             "qbittorrent": {"status": "ok"},
@@ -959,9 +959,9 @@ def test_deep_health_returns_503_when_dependency_fails(monkeypatch):
     async def fake_qbittorrent_health(settings):
         return {"status": "ok"}
 
-    monkeypatch.setattr("app.main.get_settings", lambda: object())
-    monkeypatch.setattr("app.main.check_prowlarr_health", fake_prowlarr_health, raising=False)
-    monkeypatch.setattr("app.main.check_qbittorrent_health", fake_qbittorrent_health, raising=False)
+    monkeypatch.setattr("mpilot.api.main.get_settings", lambda: object())
+    monkeypatch.setattr("mpilot.api.main.check_prowlarr_health", fake_prowlarr_health, raising=False)
+    monkeypatch.setattr("mpilot.api.main.check_qbittorrent_health", fake_qbittorrent_health, raising=False)
 
     client = TestClient(app)
     response = client.get("/health?deep=true")
@@ -972,7 +972,7 @@ def test_deep_health_returns_503_when_dependency_fails(monkeypatch):
 
 
 def test_prowlarr_indexers_endpoint_returns_discoverable_indexer_ids(monkeypatch):
-    import app.api.prowlarr as prowlarr_api
+    import mpilot.api.prowlarr as prowlarr_api
 
     async def fake_list_indexers(settings):
         return [
@@ -1002,7 +1002,7 @@ def test_prowlarr_indexers_endpoint_returns_discoverable_indexer_ids(monkeypatch
 
 
 def test_download_status_endpoint_returns_targeted_torrent(monkeypatch):
-    import app.api.downloads_list as downloads_api
+    import mpilot.api.downloads_list as downloads_api
 
     async def fake_get_download_status(settings, info_hash, requester_id=None):
         assert info_hash == "abcdef1234567890"
@@ -1027,7 +1027,7 @@ def test_download_status_endpoint_returns_targeted_torrent(monkeypatch):
 
 
 def test_downloads_endpoint_passes_user_filter_to_qbittorrent(monkeypatch):
-    import app.api.downloads_list as downloads_api
+    import mpilot.api.downloads_list as downloads_api
 
     async def fake_list_downloads(settings, requester_id=None):
         assert requester_id == "telegram:123456789"
@@ -1053,7 +1053,7 @@ def test_downloads_endpoint_passes_user_filter_to_qbittorrent(monkeypatch):
 
 
 def test_download_status_endpoint_passes_user_filter_to_qbittorrent(monkeypatch):
-    import app.api.downloads_list as downloads_api
+    import mpilot.api.downloads_list as downloads_api
 
     async def fake_get_download_status(settings, info_hash, requester_id=None):
         assert info_hash == "abcdef1234567890"
@@ -1078,7 +1078,7 @@ def test_download_status_endpoint_passes_user_filter_to_qbittorrent(monkeypatch)
 
 
 def test_rendered_downloads_status_endpoint_returns_chat_message_and_watch_policy(monkeypatch):
-    import app.api.downloads_list as downloads_api
+    import mpilot.api.downloads_list as downloads_api
 
     async def fake_list_downloads(settings, requester_id=None):
         assert requester_id == "telegram:123456789"
@@ -1117,7 +1117,7 @@ def test_rendered_downloads_status_endpoint_returns_chat_message_and_watch_polic
 
 
 def test_rendered_download_status_endpoint_returns_single_status_message(monkeypatch):
-    import app.api.downloads_list as downloads_api
+    import mpilot.api.downloads_list as downloads_api
 
     async def fake_get_download_status(settings, info_hash, requester_id=None):
         assert info_hash == "abcdef1234567890"
@@ -1152,7 +1152,7 @@ def test_rendered_download_status_endpoint_returns_single_status_message(monkeyp
 
 
 def test_pause_download_endpoint_requires_user_filter_and_returns_download(monkeypatch):
-    import app.api.downloads_list as downloads_api
+    import mpilot.api.downloads_list as downloads_api
 
     async def fake_pause_download(settings, info_hash, requester_id):
         assert info_hash == "abcdef1234567890"
@@ -1180,7 +1180,7 @@ def test_pause_download_endpoint_requires_user_filter_and_returns_download(monke
 
 
 def test_resume_download_endpoint_returns_404_when_requester_does_not_own_download(monkeypatch):
-    import app.api.downloads_list as downloads_api
+    import mpilot.api.downloads_list as downloads_api
 
     async def fake_resume_download(settings, info_hash, requester_id):
         assert info_hash == "abcdef1234567890"
@@ -1198,7 +1198,7 @@ def test_resume_download_endpoint_returns_404_when_requester_does_not_own_downlo
 
 
 def test_delete_download_endpoint_keeps_files_and_returns_deleted_download(monkeypatch):
-    import app.api.downloads_list as downloads_api
+    import mpilot.api.downloads_list as downloads_api
 
     async def fake_delete_download(settings, info_hash, requester_id):
         assert info_hash == "abcdef1234567890"
@@ -1232,32 +1232,39 @@ def test_download_control_endpoint_requires_user_id():
     assert response.status_code == 422
 
 
-def test_mcp_mount_exposes_same_qbitlarr_operations_as_stdio_server():
+def test_mcp_mount_exposes_acquisition_operations():
     openapi = app.openapi()
     handle_operation = openapi["paths"]["/handle"]["post"]
     snapshot_operation = openapi["paths"]["/queries/{query_id}"]["get"]
-    qbitlarr_operations = {
+    old_operations = {
         operation.get("operationId")
         for path, methods in openapi["paths"].items()
         for operation in methods.values()
         if isinstance(operation, dict) and operation.get("operationId", "").startswith("qbitlarr_")
     }
+    acquisition_operations = {
+        operation.get("operationId")
+        for path, methods in openapi["paths"].items()
+        for operation in methods.values()
+        if isinstance(operation, dict) and operation.get("operationId", "").startswith("acquisition_")
+    }
 
-    assert handle_operation["operationId"] == "qbitlarr_handle"
-    assert snapshot_operation["operationId"] == "qbitlarr_get_query_snapshot"
-    assert qbitlarr_operations == {
-        "qbitlarr_download",
-        "qbitlarr_delete_download",
-        "qbitlarr_get_download_status",
-        "qbitlarr_get_query_snapshot",
-        "qbitlarr_handle",
-        "qbitlarr_health",
-        "qbitlarr_list_downloads",
-        "qbitlarr_list_prowlarr_indexers",
-        "qbitlarr_pause_download",
-        "qbitlarr_render_download_status",
-        "qbitlarr_render_downloads_status",
-        "qbitlarr_resume_download",
-        "qbitlarr_search",
+    assert old_operations == set()
+    assert handle_operation["operationId"] == "acquisition_handle"
+    assert snapshot_operation["operationId"] == "acquisition_get_query_snapshot"
+    assert acquisition_operations == {
+        "acquisition_download",
+        "acquisition_delete_download",
+        "acquisition_get_download_status",
+        "acquisition_get_query_snapshot",
+        "acquisition_handle",
+        "acquisition_health",
+        "acquisition_list_downloads",
+        "acquisition_list_indexers",
+        "acquisition_pause_download",
+        "acquisition_render_download_status",
+        "acquisition_render_downloads_status",
+        "acquisition_resume_download",
+        "acquisition_search",
     }
     assert any(getattr(route, "path", "") == "/mcp" for route in app.routes)

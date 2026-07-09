@@ -53,26 +53,11 @@ dev = [
 mpilot = "mpilot.cli:main"
 mpilot-mcp = "mpilot.mcp.server:main"
 mpilot-daemon = "mpilot.daemon.cli:main"
-qbitlarr = "mpilot.acquisition.cli:main"
-qbitlarr-mcp = "mpilot.mcp.legacy_qbitlarr:main"
-babelarr = "mpilot.subtitles.cli:main"
-babelarr-mcp = "mpilot.subtitles.mcp_server:main"
-babelarr-runtime = "mpilot.runtime.cli:main"
-babelarr-runtime-mcp = "mpilot.runtime.mcp_server:main"
-media-subtitle-translator = "mpilot.subtitles.cli:main"
-media-workflow-runtime = "mpilot.runtime.cli:main"
-mst-mcp = "mpilot.subtitles.mcp_server:main"
-mwr-mcp = "mpilot.runtime.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src", "."]
 include = [
   "mpilot*",
-  "app*",
-  "mcp_server*",
-  "babelarr*",
-  "media_workflow_runtime*",
-  "media_subtitle_translator*",
 ]
 exclude = ["tests*", "docs*"]
 

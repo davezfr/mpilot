@@ -6,21 +6,21 @@ import json
 import sys
 from typing import Any, Callable, TextIO
 
-from mpilot.acquisition.client import DEFAULT_QBITLARR_API_URL, QbitlarrApiClient, QbitlarrApiError
+from mpilot.acquisition.client import DEFAULT_ACQUISITION_API_URL, AcquisitionApiClient, AcquisitionApiError
 from mpilot.acquisition.env import env_first
 
 
-ClientFactory = Callable[[argparse.Namespace], QbitlarrApiClient]
+ClientFactory = Callable[[argparse.Namespace], AcquisitionApiClient]
 
 
-def build_parser(prog: str = "qbitlarr") -> argparse.ArgumentParser:
+def build_parser(prog: str = "mpilot acquisition") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog,
         description="CLI client for the MPilot acquisition REST API.",
     )
     parser.add_argument(
         "--api-url",
-        default=env_first("QBITLARR_API_URL", default=DEFAULT_QBITLARR_API_URL),
+        default=env_first("QBITLARR_API_URL", default=DEFAULT_ACQUISITION_API_URL),
         help="MPilot acquisition API URL. Defaults to MPILOT_ACQUISITION_API_URL, QBITLARR_API_URL, or http://127.0.0.1:8000.",
     )
     parser.add_argument(
@@ -78,8 +78,8 @@ def build_parser(prog: str = "qbitlarr") -> argparse.ArgumentParser:
     return parser
 
 
-def _default_client_factory(args: argparse.Namespace) -> QbitlarrApiClient:
-    return QbitlarrApiClient(
+def _default_client_factory(args: argparse.Namespace) -> AcquisitionApiClient:
+    return AcquisitionApiClient(
         api_url=args.api_url,
         api_key=args.api_key,
         timeout=args.timeout,
@@ -91,7 +91,7 @@ def main(
     *,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
-    prog: str = "qbitlarr",
+    prog: str = "mpilot acquisition",
     client_factory: ClientFactory = _default_client_factory,
 ) -> int:
     stdout = stdout or sys.stdout
@@ -102,7 +102,7 @@ def main(
 
     try:
         asyncio.run(_run_command(args, client, stdout))
-    except QbitlarrApiError as exc:
+    except AcquisitionApiError as exc:
         print(str(exc), file=stderr)
         return 1
     except KeyboardInterrupt:
@@ -110,7 +110,7 @@ def main(
     return 0
 
 
-async def _run_command(args: argparse.Namespace, client: QbitlarrApiClient, stdout: TextIO) -> None:
+async def _run_command(args: argparse.Namespace, client: AcquisitionApiClient, stdout: TextIO) -> None:
     if args.command == "handle":
         payload = await client.handle(
             user_message=" ".join(args.user_message),
@@ -126,7 +126,7 @@ async def _run_command(args: argparse.Namespace, client: QbitlarrApiClient, stdo
 
     if args.command == "search":
         if not args.identifier and not args.query:
-            raise QbitlarrApiError("search requires --identifier, --query, or both")
+            raise AcquisitionApiError("search requires --identifier, --query, or both")
         _write_json(
             await client.search(
                 identifier=args.identifier,
@@ -177,11 +177,11 @@ async def _run_command(args: argparse.Namespace, client: QbitlarrApiClient, stdo
         _write_json(await client.get_query_snapshot(args.query_id), stdout)
         return
 
-    raise QbitlarrApiError(f"Unknown command: {args.command}")
+    raise AcquisitionApiError(f"Unknown command: {args.command}")
 
 
 async def _write_downloads(
-    client: QbitlarrApiClient,
+    client: AcquisitionApiClient,
     stdout: TextIO,
     *,
     watch: bool,
@@ -197,7 +197,7 @@ async def _write_downloads(
 
 
 async def _write_rendered_downloads(
-    client: QbitlarrApiClient,
+    client: AcquisitionApiClient,
     stdout: TextIO,
     *,
     watch: bool,
@@ -253,7 +253,7 @@ def _format_handle_response_for_humans(payload: dict[str, Any]) -> str:
                 )
                 lines.append(f"{index}. {label}")
             lines.append("")
-            lines.append("Pick one by its IMDb ID, e.g. `qbitlarr handle tt0045877`.")
+            lines.append("Pick one by its IMDb ID, e.g. `mpilot acquisition handle tt0045877`.")
 
     if action in ("show_results", "confirm"):
         if results:
@@ -273,7 +273,7 @@ def _format_handle_response_for_humans(payload: dict[str, Any]) -> str:
 
         if results or alternatives:
             lines.append("")
-            lines.append("Use --json to inspect download links or pass a chosen link to `qbitlarr download`.")
+            lines.append("Use --json to inspect download links or pass a chosen link to `mpilot acquisition download`.")
 
     if lines:
         return "\n".join(lines)

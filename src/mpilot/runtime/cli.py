@@ -20,10 +20,15 @@ def default_runtime_store_dir() -> Path:
     )
     if configured:
         return Path(configured).expanduser()
-    return Path.home() / ".local" / "share" / "media-workflow-runtime" / "workflows"
+    default_path = Path.home() / ".local" / "share" / "mpilot" / "runtime" / "workflows"
+    legacy_dir = "media-" + "workflow-runtime"
+    legacy_path = Path.home() / ".local" / "share" / legacy_dir / "workflows"
+    if legacy_path.exists() and not default_path.exists():
+        return legacy_path
+    return default_path
 
 
-def build_parser(prog: str = "media-workflow-runtime") -> argparse.ArgumentParser:
+def build_parser(prog: str = "mpilot runtime") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog,
         description="Coordinate cross-MCP media acquisition and subtitle workflow state.",
@@ -35,12 +40,15 @@ def build_parser(prog: str = "media-workflow-runtime") -> argparse.ArgumentParse
         help=(
             "Runtime workflow store directory. Defaults to MPILOT_RUNTIME_STORE_DIR, "
             "BABELARR_RUNTIME_STORE_DIR, MWR_STORE_DIR, MEDIA_WORKFLOW_RUNTIME_STORE_DIR, or "
-            "~/.local/share/media-workflow-runtime/workflows."
+            "~/.local/share/mpilot/runtime/workflows."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    record_download = subparsers.add_parser("record-qbitlarr-download", help="Create or update a qBitlarr download task.")
+    record_download = subparsers.add_parser(
+        "record-acquisition-download",
+        help="Create or update a media acquisition download task.",
+    )
     _add_runtime_store_option(record_download)
     record_download.add_argument("--requester-id", required=True)
     record_download.add_argument("--info-hash", required=True)
@@ -52,8 +60,8 @@ def build_parser(prog: str = "media-workflow-runtime") -> argparse.ArgumentParse
     _add_content_path_mapping_options(record_download)
 
     record_with_intent = subparsers.add_parser(
-        "record-qbitlarr-download-with-subtitle-intent",
-        help="Create or update a qBitlarr download task and attach subtitle intent.",
+        "record-acquisition-download-with-subtitle-intent",
+        help="Create or update a media acquisition download task and attach subtitle intent.",
     )
     _add_runtime_store_option(record_with_intent)
     record_with_intent.add_argument("--requester-id", required=True)
@@ -93,34 +101,39 @@ def build_parser(prog: str = "media-workflow-runtime") -> argparse.ArgumentParse
     local_video.add_argument("--notification-language")
     _add_content_path_mapping_options(local_video)
 
-    claim = subparsers.add_parser("claim-ready-babelarr-actions", help="Claim ready Babelarr direct-video actions.")
+    claim = subparsers.add_parser(
+        "claim-ready-subtitle-job-actions",
+        help="Claim ready subtitle direct-video actions.",
+    )
     _add_runtime_store_option(claim)
     claim.add_argument("--limit", type=int)
     claim.add_argument("--workflow-id")
 
-    dispatch = subparsers.add_parser("dispatch-ready-babelarr-actions", help="Claim ready Babelarr direct-video actions and start Babelarr jobs.")
+    dispatch = subparsers.add_parser(
+        "dispatch-ready-subtitle-job-actions",
+        help="Claim ready subtitle direct-video actions and start subtitle jobs.",
+    )
     _add_runtime_store_option(dispatch)
     dispatch.add_argument("--workflow-id")
     _add_dispatch_options(dispatch)
 
-    for command_name in ("handle-acquisition-completion", "handle-qbitlarr-completion"):
-        complete = subparsers.add_parser(
-            command_name,
-            help="Handle an acquisition completion event, release Runtime dependencies, and dispatch subtitle jobs.",
-        )
-        _add_runtime_store_option(complete)
-        complete.add_argument("--info-hash")
-        complete.add_argument("--content-path")
-        complete.add_argument("--event-json", help="Completion event JSON. If omitted and required args are absent, stdin is read.")
-        _add_dispatch_options(complete)
+    complete = subparsers.add_parser(
+        "handle-acquisition-completion",
+        help="Handle an acquisition completion event, release Runtime dependencies, and dispatch subtitle jobs.",
+    )
+    _add_runtime_store_option(complete)
+    complete.add_argument("--info-hash")
+    complete.add_argument("--content-path")
+    complete.add_argument("--event-json", help="Completion event JSON. If omitted and required args are absent, stdin is read.")
+    _add_dispatch_options(complete)
 
-    created = subparsers.add_parser("record-babelarr-job-created", help="Record the Babelarr job ID for a dispatched task.")
+    created = subparsers.add_parser("record-subtitle-job-created", help="Record the subtitle job ID for a dispatched task.")
     _add_runtime_store_option(created)
     created.add_argument("--workflow-id", required=True)
     created.add_argument("--task-id", required=True)
-    created.add_argument("--babelarr-job-id", required=True)
+    created.add_argument("--subtitle-job-id", required=True)
 
-    status = subparsers.add_parser("record-babelarr-job-status", help="Mirror downstream Babelarr job status into Runtime.")
+    status = subparsers.add_parser("record-subtitle-job-status", help="Mirror downstream subtitle job status into Runtime.")
     _add_runtime_store_option(status)
     status.add_argument("--workflow-id", required=True)
     status.add_argument("--task-id", required=True)
@@ -136,7 +149,7 @@ def build_parser(prog: str = "media-workflow-runtime") -> argparse.ArgumentParse
     workflow_list = subparsers.add_parser("workflow-list", help="List Runtime workflows.")
     _add_runtime_store_option(workflow_list)
 
-    queue_status = subparsers.add_parser("queue-status", help="Show the global Babelarr subtitle queue status.")
+    queue_status = subparsers.add_parser("queue-status", help="Show the global subtitle queue status.")
     _add_runtime_store_option(queue_status)
     queue_status.add_argument("--requester-id")
     queue_status.add_argument("--job-store-dir")
@@ -144,7 +157,7 @@ def build_parser(prog: str = "media-workflow-runtime") -> argparse.ArgumentParse
     return parser
 
 
-def summary_from_argv(argv: Sequence[str], *, prog: str = "media-workflow-runtime") -> Dict[str, Any]:
+def summary_from_argv(argv: Sequence[str], *, prog: str = "mpilot runtime") -> Dict[str, Any]:
     try:
         parser = build_parser(prog=prog)
         args = parser.parse_args(list(argv))
@@ -161,6 +174,8 @@ def summary_from_argv(argv: Sequence[str], *, prog: str = "media-workflow-runtim
             },
         }
     except SystemExit as error:
+        if error.code == 0:
+            raise
         return {
             "status": "error",
             "error": {
@@ -171,14 +186,14 @@ def summary_from_argv(argv: Sequence[str], *, prog: str = "media-workflow-runtim
         }
 
 
-def main(argv: Optional[Sequence[str]] = None, *, prog: str = "media-workflow-runtime") -> int:
+def main(argv: Optional[Sequence[str]] = None, *, prog: str = "mpilot runtime") -> int:
     payload = summary_from_argv(sys.argv[1:] if argv is None else argv, prog=prog)
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if payload.get("status") != "error" else 1
 
 
 def _summary_from_args(runtime: MediaWorkflowRuntime, args: argparse.Namespace) -> Dict[str, Any]:
-    if args.command == "record-qbitlarr-download":
+    if args.command == "record-acquisition-download":
         workflow = runtime.record_qbitlarr_download(
             requester_id=args.requester_id,
             info_hash=args.info_hash,
@@ -194,7 +209,7 @@ def _summary_from_args(runtime: MediaWorkflowRuntime, args: argparse.Namespace) 
         )
         return _workflow_payload(runtime, workflow)
 
-    if args.command == "record-qbitlarr-download-with-subtitle-intent":
+    if args.command == "record-acquisition-download-with-subtitle-intent":
         workflow = runtime.record_qbitlarr_download_with_subtitle_intent(
             requester_id=args.requester_id,
             info_hash=args.info_hash,
@@ -242,7 +257,7 @@ def _summary_from_args(runtime: MediaWorkflowRuntime, args: argparse.Namespace) 
         )
         return _workflow_payload(runtime, workflow)
 
-    if args.command == "claim-ready-babelarr-actions":
+    if args.command == "claim-ready-subtitle-job-actions":
         actions = runtime.claim_ready_babelarr_job_create_video_actions(limit=args.limit, workflow_id=args.workflow_id)
         return {
             "status": "ok",
@@ -250,7 +265,7 @@ def _summary_from_args(runtime: MediaWorkflowRuntime, args: argparse.Namespace) 
             "actions": actions,
         }
 
-    if args.command == "dispatch-ready-babelarr-actions":
+    if args.command == "dispatch-ready-subtitle-job-actions":
         summary = dispatch_ready_babelarr_actions(
             runtime,
             workflow_id=args.workflow_id,
@@ -258,7 +273,7 @@ def _summary_from_args(runtime: MediaWorkflowRuntime, args: argparse.Namespace) 
         )
         return {"runtime_store": str(runtime.root), **summary}
 
-    if args.command in {"handle-acquisition-completion", "handle-qbitlarr-completion"}:
+    if args.command == "handle-acquisition-completion":
         event = _completion_event_from_args(args)
         event_name = _event_string(event, "event")
         if event_name in {"download_removed", "download_deleted", "download_abandoned"}:
@@ -290,15 +305,15 @@ def _summary_from_args(runtime: MediaWorkflowRuntime, args: argparse.Namespace) 
         )
         return {"runtime_store": str(runtime.root), **summary}
 
-    if args.command == "record-babelarr-job-created":
+    if args.command == "record-subtitle-job-created":
         workflow = runtime.record_babelarr_job_created(
             workflow_id=args.workflow_id,
             task_id=args.task_id,
-            babelarr_job_id=args.babelarr_job_id,
+            babelarr_job_id=args.subtitle_job_id,
         )
         return _workflow_payload(runtime, workflow)
 
-    if args.command == "record-babelarr-job-status":
+    if args.command == "record-subtitle-job-status":
         workflow = runtime.record_babelarr_job_status(
             workflow_id=args.workflow_id,
             task_id=args.task_id,

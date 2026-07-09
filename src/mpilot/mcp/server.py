@@ -5,15 +5,15 @@ import logging
 import os
 from typing import Any, Callable
 
-from mpilot.acquisition.client import get_qbitlarr_client
-from mpilot.mcp.legacy_qbitlarr import (
+from mpilot.acquisition.client import get_acquisition_client
+from mpilot.mcp.acquisition_helpers import (
     _completion_metadata,
     _maybe_register_completion_watch,
     _prepare_agent_handle_payload,
     _resolve_notification_target,
     _start_notifier_if_pending,
 )
-from mpilot.mcp.qbitlarr_notifications import DownloadCompletionNotifier
+from mpilot.mcp.acquisition_notifications import DownloadCompletionNotifier
 from mpilot.runtime import mcp_server as runtime_tools
 from mpilot.subtitles import mcp_server as subtitle_tools
 
@@ -50,7 +50,7 @@ async def media_request(
     """
     subtitle_requested = _string_value(subtitle_target_language) is not None
     followup_message = "Download complete. Starting subtitle processing." if subtitle_requested else None
-    payload = await get_qbitlarr_client().handle(
+    payload = await get_acquisition_client().handle(
         user_message=user_message,
         user_id=requester_id,
         save_path=save_path,
@@ -301,7 +301,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
                 the completion notification when a downstream workflow was
                 already requested.
         """
-        payload = await get_qbitlarr_client().handle(
+        payload = await get_acquisition_client().handle(
             user_message=user_message,
             user_id=user_id,
             save_path=save_path,
@@ -325,7 +325,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         indexers. Do not expose raw download_link values unless the user
         explicitly asks to queue or inspect a specific result.
         """
-        return await get_qbitlarr_client().get_query_snapshot(query_id)
+        return await get_acquisition_client().get_query_snapshot(query_id)
 
     @mcp.tool()
     async def acquisition_search(
@@ -355,7 +355,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         contains title, download_link, size, seeders, leechers, indexer,
         protocol, publish_date, and info_hash.
         """
-        return await get_qbitlarr_client().search(
+        return await get_acquisition_client().search(
             identifier=identifier,
             query=query,
             categories=categories,
@@ -405,7 +405,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
                 the completion notification when a downstream workflow was
                 already requested.
         """
-        payload = await get_qbitlarr_client().download(
+        payload = await get_acquisition_client().download(
             download_link,
             save_path=save_path,
             query_id=query_id,
@@ -428,7 +428,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         hash. When requester_id is set, only torrents tagged for that requester
         are returned. Use a stable chat/user identifier for shared bots.
         """
-        return await get_qbitlarr_client().list_downloads(user_id=requester_id)
+        return await get_acquisition_client().list_downloads(user_id=requester_id)
 
     @mcp.tool()
     async def acquisition_get_download_status(info_hash: str, requester_id: str | None = None) -> dict[str, Any]:
@@ -438,7 +438,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         exact torrent hash from a previous auto-download response. When
         requester_id is set, the torrent must be tagged for that requester.
         """
-        return await get_qbitlarr_client().get_download_status(info_hash, user_id=requester_id)
+        return await get_acquisition_client().get_download_status(info_hash, user_id=requester_id)
 
     @mcp.tool()
     async def acquisition_render_downloads_status(requester_id: str | None = None) -> dict[str, Any]:
@@ -454,7 +454,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         Completion notifications are separate one-time watches; do not merge
         them into the dynamic progress card.
         """
-        return await get_qbitlarr_client().render_downloads_status(user_id=requester_id)
+        return await get_acquisition_client().render_downloads_status(user_id=requester_id)
 
     @mcp.tool()
     async def acquisition_render_download_status(info_hash: str, requester_id: str | None = None) -> dict[str, Any]:
@@ -465,7 +465,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         verbatim and follow watch_policy exactly for bounded dynamic refreshes.
         Completion notifications remain a separate one-time watch.
         """
-        return await get_qbitlarr_client().render_download_status(info_hash, user_id=requester_id)
+        return await get_acquisition_client().render_download_status(info_hash, user_id=requester_id)
 
     @mcp.tool()
     async def acquisition_pause_download(info_hash: str, requester_id: str) -> dict[str, Any]:
@@ -476,7 +476,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         queued the download. If the torrent is not tagged for that requester,
         MPilot returns not found.
         """
-        return await get_qbitlarr_client().pause_download(info_hash, user_id=requester_id)
+        return await get_acquisition_client().pause_download(info_hash, user_id=requester_id)
 
     @mcp.tool()
     async def acquisition_resume_download(info_hash: str, requester_id: str) -> dict[str, Any]:
@@ -485,7 +485,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         This is for direct Telegram callback handling. requester_id is required
         and must match the torrent's requester tag.
         """
-        return await get_qbitlarr_client().resume_download(info_hash, user_id=requester_id)
+        return await get_acquisition_client().resume_download(info_hash, user_id=requester_id)
 
     @mcp.tool()
     async def acquisition_delete_download(info_hash: str, requester_id: str) -> dict[str, Any]:
@@ -495,7 +495,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         only after the Telegram adapter has shown an explicit confirmation.
         requester_id is required and must match the torrent's requester tag.
         """
-        return await get_qbitlarr_client().delete_download(info_hash, user_id=requester_id)
+        return await get_acquisition_client().delete_download(info_hash, user_id=requester_id)
 
     @mcp.tool()
     async def acquisition_watch_download(
@@ -534,7 +534,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         Returns service readiness. Set deep=true to also check Prowlarr and
         qBittorrent dependencies.
         """
-        return await get_qbitlarr_client().health(deep=deep)
+        return await get_acquisition_client().health(deep=deep)
 
     @mcp.tool()
     async def acquisition_list_indexers() -> list[dict[str, Any]]:
@@ -543,7 +543,7 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         Use this when setting primary or fallback indexer IDs. Each item
         includes id, name, enabled, and protocol when Prowlarr provides them.
         """
-        return await get_qbitlarr_client().list_prowlarr_indexers()
+        return await get_acquisition_client().list_prowlarr_indexers()
 
 
 def _subtitle_intent_payload(

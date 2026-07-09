@@ -1,10 +1,10 @@
 import unittest
 from pathlib import Path
 
-from babelarr.ass import AssOptions, build_ass
-from babelarr.languages import language_to_code
-from babelarr.plex import plex_sidecar_path, strip_language_suffix
-from babelarr.srt import Cue
+from mpilot.subtitles.ass import AssOptions, build_ass
+from mpilot.subtitles.languages import language_to_code
+from mpilot.subtitles.plex import plex_sidecar_path, strip_language_suffix
+from mpilot.subtitles.srt import Cue
 
 
 class PlexAndAssTests(unittest.TestCase):

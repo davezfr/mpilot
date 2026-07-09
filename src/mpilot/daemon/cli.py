@@ -19,9 +19,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--interval-seconds", type=float, default=5.0, help="Loop sleep interval outside --once.")
     parser.add_argument("--runtime-store-dir", type=Path, help="Runtime workflow store directory.")
     parser.add_argument("--job-store-dir", type=Path, help="MPilot subtitle job store directory.")
-    parser.add_argument("--no-qbitlarr", action="store_true", help="Disable qBitlarr download notification polling.")
+    parser.add_argument("--no-acquisition", action="store_true", help="Disable acquisition download notification polling.")
     parser.add_argument(
-        "--no-babelarr-notifications",
+        "--no-subtitle-notifications",
         action="store_true",
         help="Disable MPilot subtitle job notification polling.",
     )
@@ -38,8 +38,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         interval_seconds=args.interval_seconds,
         runtime_store_dir=args.runtime_store_dir,
         job_store_dir=args.job_store_dir,
-        run_qbitlarr=not args.no_qbitlarr,
-        run_babelarr_notifications_step=not args.no_babelarr_notifications,
+        run_acquisition=not args.no_acquisition,
+        run_subtitle_notifications_step=not args.no_subtitle_notifications,
         run_runtime_dispatch=not args.no_runtime_dispatch,
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))

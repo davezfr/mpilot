@@ -14,7 +14,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
-from mpilot.acquisition.client import QbitlarrApiClient, QbitlarrApiError, get_qbitlarr_client
+from mpilot.acquisition.client import AcquisitionApiClient, AcquisitionApiError, get_acquisition_client
 from mpilot.acquisition.domain.download_progress import (
     dynamic_progress_watch_policy,
     render_download_status_payload,
@@ -44,7 +44,7 @@ SendStatusMessage = Callable[[str, str, str, str | None, list[dict[str, str]] | 
 CompletionHook = Callable[[dict[str, Any]], Awaitable[None]]
 COMPLETE_STATES = {"uploading", "stalledUP", "pausedUP", "forcedUP", "queuedUP"}
 DEFAULT_MAX_ERRORS = 10
-logger = logging.getLogger("qbitlarr-mcp.notifications")
+logger = logging.getLogger("mpilot.acquisition.notifications")
 
 
 class DownloadWatchStore(LockedJsonStore):
@@ -212,7 +212,7 @@ class DownloadCompletionNotifier:
         self,
         *,
         store: DownloadWatchStore,
-        client: QbitlarrApiClient | Any,
+        client: AcquisitionApiClient | Any,
         send_message: SendMessage,
         send_status_message: SendStatusMessage | None = None,
         completion_hook: CompletionHook | None = None,
@@ -232,7 +232,7 @@ class DownloadCompletionNotifier:
     def from_env(cls) -> "DownloadCompletionNotifier":
         return cls(
             store=DownloadWatchStore(default_watch_store_path()),
-            client=get_qbitlarr_client(),
+            client=get_acquisition_client(),
             send_message=send_hermes_message,
             send_status_message=send_status_message_from_env,
             completion_hook=completion_hook_from_env(),
@@ -882,7 +882,7 @@ def _removed_message(watch: dict[str, Any]) -> str:
 
 
 def _download_was_removed(error: Exception) -> bool:
-    return isinstance(error, QbitlarrApiError) and error.status_code == 404
+    return isinstance(error, AcquisitionApiError) and error.status_code == 404
 
 
 def _normalize_hash(info_hash: str) -> str:

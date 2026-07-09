@@ -7,8 +7,8 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
-from babelarr.srt import Cue
-from babelarr.translate import Chunk, TranslationOptions, run_codex_cli, translate_cues
+from mpilot.subtitles.srt import Cue
+from mpilot.subtitles.translate import Chunk, TranslationOptions, run_codex_cli, translate_cues
 
 
 class TranslateBackendTests(unittest.TestCase):
@@ -58,9 +58,9 @@ class TranslateBackendTests(unittest.TestCase):
                     active_chunks -= 1
 
         with tempfile.TemporaryDirectory() as tmp, patch(
-            "babelarr.translate.run_backend",
+            "mpilot.subtitles.translate.run_backend",
             side_effect=fake_backend,
-        ), patch("babelarr.translate._stagger_codex_chunk_start"):
+        ), patch("mpilot.subtitles.translate._stagger_codex_chunk_start"):
             run = translate_cues(
                 source_cues,
                 TranslationOptions(
@@ -102,9 +102,9 @@ class TranslateBackendTests(unittest.TestCase):
             }
 
         with tempfile.TemporaryDirectory() as tmp, patch(
-            "babelarr.translate.run_backend",
+            "mpilot.subtitles.translate.run_backend",
             side_effect=fake_backend,
-        ), patch("babelarr.translate.time.sleep") as sleep:
+        ), patch("mpilot.subtitles.translate.time.sleep") as sleep:
             translate_cues(
                 source_cues,
                 TranslationOptions(
@@ -158,8 +158,8 @@ class TranslateBackendTests(unittest.TestCase):
             )
             chunk = Chunk(index=1, cues=[Cue(number="1", start="00:00:01,000", end="00:00:02,000", text_lines=["Hello"])])
 
-            with patch("babelarr.translate.Path.home", return_value=home), patch(
-                "babelarr.translate.subprocess.run",
+            with patch("mpilot.subtitles.translate.Path.home", return_value=home), patch(
+                "mpilot.subtitles.translate.subprocess.run",
                 side_effect=fake_run,
             ):
                 result = run_codex_cli(options, chunk, "prompt", schema_path, chunk_dir)

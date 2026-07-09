@@ -3,7 +3,7 @@ import tempfile
 import warnings
 from pathlib import Path
 
-from babelarr.srt import Cue, format_srt, parse_srt_text, read_srt
+from mpilot.subtitles.srt import Cue, format_srt, parse_srt_text, read_srt
 
 
 class SrtTests(unittest.TestCase):

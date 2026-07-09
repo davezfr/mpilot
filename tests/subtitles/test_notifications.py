@@ -10,9 +10,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from babelarr.jobs import JobStore
-from babelarr import notifications
-from babelarr.notifications import (
+from mpilot.subtitles.jobs import JobStore
+from mpilot.subtitles import notifications
+from mpilot.subtitles.notifications import (
     JobCompletionNotifier,
     JobNotificationStore,
     resolve_notification_target,
@@ -896,10 +896,10 @@ class JobNotificationTests(unittest.TestCase):
                 "BABELARR_JOB_NOTIFICATION_WATCHES_PATH": str(root / "babelarr-watches.json"),
                 "MST_JOB_NOTIFICATION_WATCHES_PATH": str(root / "legacy-watches.json"),
                 "MPILOT_SUBTITLE_JOB_NOTIFICATION_DAEMON_LOCK_PATH": str(root / "mpilot.lock"),
-                "BABELARR_JOB_NOTIFICATION_DAEMON_LOCK_PATH": str(root / "babelarr.lock"),
+                "BABELARR_JOB_NOTIFICATION_DAEMON_LOCK_PATH": str(root / "mpilot.subtitles.lock"),
                 "MST_JOB_NOTIFICATION_DAEMON_LOCK_PATH": str(root / "legacy.lock"),
                 "MPILOT_SUBTITLE_JOB_NOTIFICATION_WAKE_PATH": str(root / "mpilot.wake"),
-                "BABELARR_JOB_NOTIFICATION_WAKE_PATH": str(root / "babelarr.wake"),
+                "BABELARR_JOB_NOTIFICATION_WAKE_PATH": str(root / "mpilot.subtitles.wake"),
                 "MST_JOB_NOTIFICATION_WAKE_PATH": str(root / "legacy.wake"),
             }
             with patch.dict(os.environ, env, clear=False):

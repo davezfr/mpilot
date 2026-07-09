@@ -17,16 +17,16 @@ from mpilot.acquisition.services.query_snapshots import QuerySnapshotStore
 from mpilot.acquisition.services.qbittorrent import _download_torrent_file, add_download_to_qbittorrent
 
 
-logger = logging.getLogger("qbitlarr-api.download")
+logger = logging.getLogger("mpilot.acquisition.api.download")
 router = APIRouter()
 
 
 @router.post(
     "/download",
     response_model=DownloadResponse,
-    operation_id="qbitlarr_download",
+    operation_id="acquisition_download",
     summary="Queue a torrent or magnet in qBittorrent",
-    tags=["qbitlarr"],
+    tags=["acquisition"],
 )
 async def download(request: DownloadRequest) -> DownloadResponse:
     try:

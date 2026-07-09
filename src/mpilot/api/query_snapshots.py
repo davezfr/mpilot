@@ -10,17 +10,17 @@ from mpilot.acquisition.models import QuerySnapshot
 from mpilot.acquisition.services.query_snapshots import QuerySnapshotStore
 
 
-logger = logging.getLogger("qbitlarr-api.query-snapshots")
+logger = logging.getLogger("mpilot.acquisition.api.query-snapshots")
 router = APIRouter()
 
 
 @router.get(
     "/queries/{query_id}",
     response_model=QuerySnapshot,
-    operation_id="qbitlarr_get_query_snapshot",
-    summary="Get a saved qBitlarr query snapshot",
-    description="Return the stored search snapshot document for a previous qbitlarr_handle query_id.",
-    tags=["qbitlarr"],
+    operation_id="acquisition_get_query_snapshot",
+    summary="Get a saved MPilot acquisition query snapshot",
+    description="Return the stored search snapshot document for a previous acquisition_handle query_id.",
+    tags=["acquisition"],
 )
 async def get_query_snapshot(query_id: str) -> QuerySnapshot:
     try:

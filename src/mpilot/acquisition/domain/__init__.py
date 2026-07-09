@@ -1,1 +1,1 @@
-"""Domain helpers for qBitlarr API."""
+"""Domain helpers for MPilot acquisition API."""

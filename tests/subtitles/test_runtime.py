@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from media_workflow_runtime import (
+from mpilot.runtime import (
     MediaWorkflowRuntime,
     RuntimeStoreError,
 )
@@ -268,7 +268,7 @@ class MediaWorkflowRuntimeTests(unittest.TestCase):
             summary = runtime.clear_qbitlarr_download_workflow(
                 info_hash="abc123",
                 reason="download_removed",
-                error={"type": "QbitlarrApiError", "message": "Download not found"},
+                error={"type": "AcquisitionApiError", "message": "Download not found"},
             )
 
             self.assertEqual(summary["status"], "cleared")

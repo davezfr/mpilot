@@ -4,9 +4,9 @@ import asyncio
 import json
 from pathlib import Path
 
-from app.client import QbitlarrApiError
-from mcp_server.server import _maybe_register_completion_watch, _start_notifier_if_pending
-from mcp_server.notifications import (
+from mpilot.acquisition.client import AcquisitionApiError
+from mpilot.mcp.acquisition_helpers import _maybe_register_completion_watch, _start_notifier_if_pending
+from mpilot.mcp.acquisition_notifications import (
     DownloadCompletionNotifier,
     DownloadWatchStore,
     _call_send_status_message,
@@ -424,7 +424,7 @@ def test_poll_loop_continues_after_poll_once_failure(monkeypatch, tmp_path):
         return None
 
     notifier.poll_once = flaky_poll_once
-    monkeypatch.setattr("mcp_server.notifications.asyncio.sleep", no_sleep)
+    monkeypatch.setattr("mpilot.mcp.acquisition_notifications.asyncio.sleep", no_sleep)
 
     try:
         asyncio.run(notifier._poll_loop())
@@ -943,7 +943,7 @@ def test_notifier_reports_deleted_download_immediately(tmp_path):
 
     class MissingClient:
         async def get_download_status(self, info_hash):
-            raise QbitlarrApiError("Download not found", status_code=404)
+            raise AcquisitionApiError("Download not found", status_code=404)
 
     async def fake_send(target, message):
         sent.append((target, message))
@@ -976,7 +976,7 @@ def test_notifier_reports_deleted_download_immediately(tmp_path):
             "notification_target": "telegram:12345",
             "requester_id": "telegram:12345",
             "metadata": {"imdb_id": "tt1234567"},
-            "error": {"type": "QbitlarrApiError", "message": "Download not found"},
+            "error": {"type": "AcquisitionApiError", "message": "Download not found"},
         }
     ]
     assert store.pending_watches() == []
@@ -1030,7 +1030,7 @@ def test_send_hermes_message_uses_configured_profile(monkeypatch):
 
     monkeypatch.setenv("QBITLARR_HERMES_BIN", "/usr/local/bin/hermes")
     monkeypatch.setenv("QBITLARR_HERMES_PROFILE", "example-bot")
-    monkeypatch.setattr("mcp_server.notifications.asyncio.create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("mpilot.mcp.acquisition_notifications.asyncio.create_subprocess_exec", fake_create_subprocess_exec)
 
     asyncio.run(send_hermes_message("telegram:12345", "done"))
 
@@ -1080,8 +1080,8 @@ def test_send_hermes_message_times_out(monkeypatch):
         raise TimeoutError
 
     monkeypatch.setenv("QBITLARR_HERMES_SEND_TIMEOUT_SECONDS", "0.5")
-    monkeypatch.setattr("mcp_server.notifications.asyncio.create_subprocess_exec", fake_create_subprocess_exec)
-    monkeypatch.setattr("mcp_server.notifications.asyncio.wait_for", fake_wait_for)
+    monkeypatch.setattr("mpilot.mcp.acquisition_notifications.asyncio.create_subprocess_exec", fake_create_subprocess_exec)
+    monkeypatch.setattr("mpilot.mcp.acquisition_notifications.asyncio.wait_for", fake_wait_for)
 
     try:
         asyncio.run(send_hermes_message("telegram:12345", "done"))
@@ -1172,7 +1172,7 @@ def test_telegram_status_message_sends_new_message_when_edit_target_is_missing(m
             raise RuntimeError("Bad Request: message to edit not found")
         return {"result": {"message_id": 222}}
 
-    monkeypatch.setattr("mcp_server.notifications._telegram_api_post", fake_telegram_api_post)
+    monkeypatch.setattr("mpilot.mcp.acquisition_notifications._telegram_api_post", fake_telegram_api_post)
 
     result = asyncio.run(
         _send_or_edit_telegram_status_message(
@@ -1213,7 +1213,7 @@ def test_telegram_status_message_sends_download_control_buttons(monkeypatch):
         calls.append((method, payload))
         return {"result": {"message_id": 222}}
 
-    monkeypatch.setattr("mcp_server.notifications._telegram_api_post", fake_telegram_api_post)
+    monkeypatch.setattr("mpilot.mcp.acquisition_notifications._telegram_api_post", fake_telegram_api_post)
 
     result = asyncio.run(
         _send_or_edit_telegram_status_message(
@@ -1265,7 +1265,7 @@ def test_telegram_status_message_keeps_existing_message_on_transient_edit_failur
             raise RuntimeError("Too Many Requests: retry after 30")
         raise AssertionError("transient edit failures should not create a second progress message")
 
-    monkeypatch.setattr("mcp_server.notifications._telegram_api_post", fake_telegram_api_post)
+    monkeypatch.setattr("mpilot.mcp.acquisition_notifications._telegram_api_post", fake_telegram_api_post)
 
     result = asyncio.run(
         _send_or_edit_telegram_status_message(

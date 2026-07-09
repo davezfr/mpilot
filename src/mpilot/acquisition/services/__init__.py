@@ -1,1 +1,1 @@
-"""External service clients for qBitlarr API."""
+"""External service clients for MPilot acquisition API."""

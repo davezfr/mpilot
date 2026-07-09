@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from babelarr.cli import build_parser
+from mpilot.subtitles.cli import build_parser
 
 
 class EnvLoadingTests(unittest.TestCase):

@@ -29,16 +29,16 @@ from mpilot.acquisition.services.qbittorrent import (
 )
 
 
-logger = logging.getLogger("qbitlarr-api.downloads")
+logger = logging.getLogger("mpilot.acquisition.api.downloads")
 router = APIRouter()
 
 
 @router.get(
     "/downloads",
     response_model=list[TorrentStatus],
-    operation_id="qbitlarr_list_downloads",
+    operation_id="acquisition_list_downloads",
     summary="List qBittorrent downloads",
-    tags=["qbitlarr"],
+    tags=["acquisition"],
 )
 async def list_downloads(
     user_id: str | None = Query(
@@ -59,9 +59,9 @@ async def list_downloads(
 @router.get(
     "/downloads/status-message",
     response_model=RenderedDownloadsStatusResponse,
-    operation_id="qbitlarr_render_downloads_status",
+    operation_id="acquisition_render_downloads_status",
     summary="Render qBittorrent downloads as a chat progress message",
-    tags=["qbitlarr"],
+    tags=["acquisition"],
 )
 async def render_downloads_status_message(
     user_id: str | None = Query(
@@ -90,9 +90,9 @@ async def render_downloads_status_message(
 @router.get(
     "/downloads/{info_hash}/status-message",
     response_model=RenderedDownloadStatusResponse,
-    operation_id="qbitlarr_render_download_status",
+    operation_id="acquisition_render_download_status",
     summary="Render one qBittorrent download as a chat progress message",
-    tags=["qbitlarr"],
+    tags=["acquisition"],
 )
 async def render_download_status_message(
     info_hash: str,
@@ -127,9 +127,9 @@ async def render_download_status_message(
 @router.get(
     "/downloads/{info_hash}",
     response_model=TorrentStatus,
-    operation_id="qbitlarr_get_download_status",
+    operation_id="acquisition_get_download_status",
     summary="Get one qBittorrent download by info hash",
-    tags=["qbitlarr"],
+    tags=["acquisition"],
 )
 async def get_download_status(
     info_hash: str,
@@ -158,9 +158,9 @@ async def get_download_status(
 @router.post(
     "/downloads/{info_hash}/pause",
     response_model=DownloadControlResponse,
-    operation_id="qbitlarr_pause_download",
+    operation_id="acquisition_pause_download",
     summary="Pause one qBittorrent download by info hash",
-    tags=["qbitlarr"],
+    tags=["acquisition"],
 )
 async def pause_download(
     info_hash: str,
@@ -175,9 +175,9 @@ async def pause_download(
 @router.post(
     "/downloads/{info_hash}/resume",
     response_model=DownloadControlResponse,
-    operation_id="qbitlarr_resume_download",
+    operation_id="acquisition_resume_download",
     summary="Resume one qBittorrent download by info hash",
-    tags=["qbitlarr"],
+    tags=["acquisition"],
 )
 async def resume_download(
     info_hash: str,
@@ -192,9 +192,9 @@ async def resume_download(
 @router.post(
     "/downloads/{info_hash}/delete",
     response_model=DownloadControlResponse,
-    operation_id="qbitlarr_delete_download",
+    operation_id="acquisition_delete_download",
     summary="Delete one qBittorrent download task by info hash",
-    tags=["qbitlarr"],
+    tags=["acquisition"],
 )
 async def delete_download(
     info_hash: str,

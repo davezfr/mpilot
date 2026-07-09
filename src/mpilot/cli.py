@@ -4,7 +4,7 @@ import argparse
 import sys
 from typing import Sequence
 
-from mpilot.acquisition.cli import main as qbitlarr_main
+from mpilot.acquisition.cli import main as acquisition_main
 from mpilot.runtime.cli import main as runtime_main
 from mpilot.subtitles.cli import main as subtitles_main
 
@@ -22,10 +22,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     command, remainder = args[0], args[1:]
-    if command in ("acquisition", "qbitlarr"):
-        return qbitlarr_main(remainder, prog="mpilot acquisition" if command == "acquisition" else "mpilot qbitlarr")
-    if command in ("subtitles", "babelarr"):
-        return subtitles_main(remainder, prog="mpilot subtitles" if command == "subtitles" else "mpilot babelarr")
+    if command == "acquisition":
+        return acquisition_main(remainder, prog="mpilot acquisition")
+    if command == "subtitles":
+        return subtitles_main(remainder, prog="mpilot subtitles")
     if command == "runtime":
         return runtime_main(remainder, prog="mpilot runtime")
     parser.error("unknown command: %s" % command)

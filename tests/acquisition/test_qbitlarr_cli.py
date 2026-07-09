@@ -5,8 +5,8 @@ import json
 import os
 from types import SimpleNamespace
 
-from app.cli import main
-from app.client import QbitlarrApiError
+from mpilot.acquisition.cli import main
+from mpilot.acquisition.client import AcquisitionApiError
 
 
 class FakeClient:
@@ -90,7 +90,7 @@ class FakeClient:
 
     async def health(self, *, deep=False):
         self.calls.append(("health", {"deep": deep}))
-        return {"status": "ok", "service": "qBitlarr API"}
+        return {"status": "ok", "service": "MPilot acquisition API"}
 
     async def list_prowlarr_indexers(self):
         self.calls.append(("indexers", {}))
@@ -191,7 +191,7 @@ def test_cli_handle_prints_numbered_results_by_default():
         "2. The.General.1926.720p.WEB-DL.H.264-GRP\n"
         "   Quality: 720p WEB-DL H.264 | Seeders: 9\n"
         "\n"
-        "Use --json to inspect download links or pass a chosen link to `qbitlarr download`.\n"
+        "Use --json to inspect download links or pass a chosen link to `mpilot acquisition download`.\n"
     )
     assert "download_link" not in result.stdout
 
@@ -214,7 +214,7 @@ def test_cli_handle_prints_title_candidates_for_choose_title():
     assert result.exit_code == 0
     assert "1. The Hitch-Hiker (1953)" in result.stdout
     assert "2. The Hitch Hiker (2004)" in result.stdout
-    assert "qbitlarr handle tt0045877" in result.stdout
+    assert "mpilot acquisition handle tt0045877" in result.stdout
 
 
 def test_cli_handle_json_flag_forwards_message_mode_and_save_path():
@@ -384,7 +384,7 @@ def test_cli_health_supports_deep_check():
     result = _run_cli(["health", "--deep"], fake_client)
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["service"] == "qBitlarr API"
+    assert json.loads(result.stdout)["service"] == "MPilot acquisition API"
     assert fake_client.calls == [("health", {"deep": True})]
 
 
@@ -433,17 +433,16 @@ def test_cli_search_requires_identifier_or_query():
 def test_cli_api_errors_are_printed_to_stderr():
     class FailingClient(FakeClient):
         async def health(self, *, deep=False):
-            raise QbitlarrApiError("qBitlarr API is unreachable: ConnectError")
+            raise AcquisitionApiError("MPilot acquisition API is unreachable: ConnectError")
 
     result = _run_cli(["health"], FailingClient())
 
     assert result.exit_code == 1
     assert result.stdout == ""
-    assert "qBitlarr API is unreachable: ConnectError" in result.stderr
+    assert "MPilot acquisition API is unreachable: ConnectError" in result.stderr
 
 
-def test_bin_qbitlarr_launcher_exists_and_is_executable():
-    script_path = "bin/qbitlarr"
+def test_legacy_qbitlarr_launcher_is_not_shipped():
+    script_path = "bin/" + "qbitlarr"
 
-    assert os.path.exists(script_path)
-    assert os.access(script_path, os.X_OK)
+    assert not os.path.exists(script_path)

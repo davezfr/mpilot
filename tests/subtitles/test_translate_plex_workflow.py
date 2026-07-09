@@ -3,12 +3,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from babelarr.cli import build_parser
-from babelarr.plex_resolver import PlexResolvedMedia
-from babelarr.provider_policy import ProviderDownloadSelection
-from babelarr.providers.base import DownloadedSubtitle, SubtitleCandidate
-from babelarr.source import AcquisitionResult, AcquisitionStatus
-from babelarr.workflow import WorkflowOptions, translate_plex_resolved
+from mpilot.subtitles.cli import build_parser
+from mpilot.subtitles.plex_resolver import PlexResolvedMedia
+from mpilot.subtitles.provider_policy import ProviderDownloadSelection
+from mpilot.subtitles.providers.base import DownloadedSubtitle, SubtitleCandidate
+from mpilot.subtitles.source import AcquisitionResult, AcquisitionStatus
+from mpilot.subtitles.workflow import WorkflowOptions, translate_plex_resolved
 
 
 SAMPLE_SRT = """1
@@ -402,7 +402,7 @@ class TranslatePlexWorkflowTests(unittest.TestCase):
                 )
 
             with patch(
-                "babelarr.workflow.acquire_source_subtitle",
+                "mpilot.subtitles.workflow.acquire_source_subtitle",
                 return_value=AcquisitionResult(
                     status=AcquisitionStatus.NOT_FOUND,
                     method="none",
@@ -468,7 +468,7 @@ class TranslatePlexWorkflowTests(unittest.TestCase):
                 raise AssertionError("provider fetch should not run when output already exists")
 
             with patch(
-                "babelarr.workflow.acquire_source_subtitle",
+                "mpilot.subtitles.workflow.acquire_source_subtitle",
                 return_value=AcquisitionResult(
                     status=AcquisitionStatus.NOT_FOUND,
                     method="none",

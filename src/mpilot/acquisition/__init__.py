@@ -1,1 +1,1 @@
-"""qBitlarr API package."""
+"""MPilot acquisition API package."""

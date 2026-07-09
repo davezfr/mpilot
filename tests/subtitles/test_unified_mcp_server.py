@@ -46,7 +46,7 @@ class FakeNotifier:
         return None
 
 
-class FakeQbitlarrClient:
+class FakeAcquisitionClient:
     def __init__(self, payload):
         self.payload = payload
         self.calls = []
@@ -113,7 +113,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
         self.assertNotIn("acquisition_handle", server.tool_names)
 
     def test_media_request_without_subtitles_is_qbitlarr_handle_passthrough(self):
-        client = FakeQbitlarrClient(
+        client = FakeAcquisitionClient(
             {
                 "status": "success",
                 "action": "auto_download",
@@ -122,7 +122,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
             }
         )
 
-        with patch.object(unified, "get_qbitlarr_client", return_value=client):
+        with patch.object(unified, "get_acquisition_client", return_value=client):
             payload = asyncio.run(unified.media_request("Example Movie", requester_id="user-123", mode="auto"))
 
         self.assertEqual(payload["action"], "auto_download")
@@ -132,7 +132,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
         self.assertEqual(client.calls[0]["mode"], "auto")
 
     def test_media_request_records_download_and_subtitle_intent(self):
-        client = FakeQbitlarrClient(
+        client = FakeAcquisitionClient(
             {
                 "status": "success",
                 "action": "auto_download",
@@ -153,7 +153,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
             calls.append(kwargs)
             return {"workflow_id": "workflow_123", "tasks": [{"task_type": "download_media"}]}
 
-        with patch.object(unified, "get_qbitlarr_client", return_value=client), patch.object(
+        with patch.object(unified, "get_acquisition_client", return_value=client), patch.object(
             unified.runtime_tools,
             "record_qbitlarr_download_with_subtitle_intent",
             side_effect=fake_record,
@@ -178,7 +178,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
         self.assertEqual(calls[0]["imdb_id"], "tt1234567")
 
     def test_media_request_carries_subtitle_intent_through_clarify_payload(self):
-        client = FakeQbitlarrClient(
+        client = FakeAcquisitionClient(
             {
                 "status": "success",
                 "action": "show_results",
@@ -197,7 +197,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
             }
         )
 
-        with patch.object(unified, "get_qbitlarr_client", return_value=client):
+        with patch.object(unified, "get_acquisition_client", return_value=client):
             payload = asyncio.run(
                 unified.media_request(
                     "Example Movie",
@@ -216,7 +216,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
         )
 
     def test_media_request_keeps_download_payload_when_runtime_registration_fails(self):
-        client = FakeQbitlarrClient(
+        client = FakeAcquisitionClient(
             {
                 "status": "success",
                 "action": "auto_download",
@@ -228,7 +228,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
         def fake_record(**_kwargs):
             raise RuntimeStoreError("store is unavailable")
 
-        with patch.object(unified, "get_qbitlarr_client", return_value=client), patch.object(
+        with patch.object(unified, "get_acquisition_client", return_value=client), patch.object(
             unified.runtime_tools,
             "record_qbitlarr_download_with_subtitle_intent",
             side_effect=fake_record,
@@ -247,7 +247,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
         self.assertEqual(payload["subtitle_intent"]["error"]["type"], "RuntimeStoreError")
 
     def test_media_request_reuses_single_download_completion_notifier(self):
-        client = FakeQbitlarrClient(
+        client = FakeAcquisitionClient(
             {
                 "status": "success",
                 "action": "auto_download",
@@ -259,7 +259,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
 
         with patch.object(unified, "_download_completion_notifier_cache", None), patch.object(
             unified,
-            "get_qbitlarr_client",
+            "get_acquisition_client",
             return_value=client,
         ), patch.object(
             unified.DownloadCompletionNotifier,

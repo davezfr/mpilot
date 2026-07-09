@@ -10,16 +10,16 @@ from mpilot.acquisition.models import SearchRequest, SearchResult
 from mpilot.acquisition.services.prowlarr import search_prowlarr
 
 
-logger = logging.getLogger("qbitlarr-api.search")
+logger = logging.getLogger("mpilot.acquisition.api.search")
 router = APIRouter()
 
 
 @router.post(
     "/search",
     response_model=list[SearchResult],
-    operation_id="qbitlarr_search",
+    operation_id="acquisition_search",
     summary="Search Prowlarr",
-    tags=["qbitlarr"],
+    tags=["acquisition"],
 )
 async def search(request: SearchRequest) -> list[SearchResult]:
     try:

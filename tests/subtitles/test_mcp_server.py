@@ -4,7 +4,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-from babelarr import mcp_server
+from mpilot.subtitles import mcp_server
 
 
 class FakeFastMCP:
@@ -270,7 +270,7 @@ class McpServerTests(unittest.TestCase):
         ):
             server = mcp_server.create_mcp_server()
 
-        self.assertEqual(server.name, "babelarr")
+        self.assertEqual(server.name, "mpilot-subtitles")
         self.assertEqual(
             server.tool_names,
             [

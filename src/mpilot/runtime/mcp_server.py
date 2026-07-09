@@ -405,7 +405,7 @@ def main() -> int:
     try:
         create_mcp_server().run()
     except RuntimeError as error:
-        print("media-workflow-runtime MCP: %s" % error, file=sys.stderr)
+        print("MPilot runtime MCP: %s" % error, file=sys.stderr)
         return 1
     return 0
 

@@ -54,7 +54,7 @@ class SourceAcquisitionTests(unittest.TestCase):
                 stderr="",
             )
 
-        with patch("babelarr.source.subprocess.run", side_effect=fake_run):
+        with patch("mpilot.subtitles.source.subprocess.run", side_effect=fake_run):
             resolved = resolve_video_file_path(
                 Path("/mnt/media/Movies/Movie Folder"),
                 remote_runner=runner,
@@ -87,7 +87,7 @@ class SourceAcquisitionTests(unittest.TestCase):
                 stderr="",
             )
 
-        with patch("babelarr.source.subprocess.run", side_effect=fake_run):
+        with patch("mpilot.subtitles.source.subprocess.run", side_effect=fake_run):
             resolved = resolve_video_file_path(
                 Path("/mnt/media/Movies/Movie Folder"),
                 remote_runner=runner,
@@ -120,7 +120,7 @@ class SourceAcquisitionTests(unittest.TestCase):
                 stderr="",
             )
 
-        with patch("babelarr.source.subprocess.run", side_effect=fake_run):
+        with patch("mpilot.subtitles.source.subprocess.run", side_effect=fake_run):
             resolved = resolve_video_file_path(
                 Path("/mnt/media/Movies/Movie Folder"),
                 remote_runner=runner,
@@ -369,7 +369,7 @@ class SourceAcquisitionTests(unittest.TestCase):
                 self.assertIn("mkdir -p", command[2])
                 return CompletedProcess(command, 0, stdout="", stderr="")
 
-            with patch("babelarr.source.subprocess.run", side_effect=fake_run):
+            with patch("mpilot.subtitles.source.subprocess.run", side_effect=fake_run):
                 runner.ensure_remote_can_write(Path("/mnt/media/Movies/Movie.zh.ass"))
                 runner.copy_file_to_remote(source, Path("/mnt/media/Movies/Movie.zh.ass"))
 
@@ -464,7 +464,7 @@ Input #0, matroska,webm, from 'Movie.mkv':
             self.assertEqual(command[0], "ffmpeg")
             return CompletedProcess(command, 1, stdout="", stderr=ffmpeg_output)
 
-        with patch("babelarr.source.subprocess.run", side_effect=fake_run):
+        with patch("mpilot.subtitles.source.subprocess.run", side_effect=fake_run):
             streams = probe_subtitle_streams(Path("Movie.mkv"))
 
         self.assertEqual(streams, [SubtitleStream(index=2, codec_name="subrip", language="eng", title=None)])

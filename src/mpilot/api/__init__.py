@@ -1,1 +1,1 @@
-"""FastAPI routers for qBitlarr API."""
+"""FastAPI routers for MPilot acquisition API."""

@@ -5,7 +5,7 @@ import base64
 import hashlib
 from types import SimpleNamespace
 
-from app.services.qbittorrent import (
+from mpilot.acquisition.services.qbittorrent import (
     _TORRENT_FILE_CACHE,
     _TORRENT_FILE_CACHE_MAX_ENTRIES,
     add_download_to_qbittorrent,
@@ -197,8 +197,8 @@ def _reset_fakes():
 
 def test_add_download_uploads_http_torrent_content(monkeypatch):
     _reset_fakes()
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     asyncio.run(
         add_download_to_qbittorrent(
@@ -220,8 +220,8 @@ def test_add_download_uploads_http_torrent_content(monkeypatch):
 
 def test_add_download_passes_magnets_as_urls(monkeypatch):
     _reset_fakes()
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     asyncio.run(add_download_to_qbittorrent("magnet:?xt=urn:btih:abcdef", _settings()))
 
@@ -239,8 +239,8 @@ def test_add_download_detects_existing_base32_magnet_hash(monkeypatch):
     _reset_fakes()
     base32_hash = base64.b32encode(bytes.fromhex(INFO_HASH)).decode("ascii").rstrip("=")
     FakeQbittorrentClient.existing_hashes = [INFO_HASH]
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     status = asyncio.run(add_download_to_qbittorrent(f"magnet:?xt=urn:btih:{base32_hash}", _settings()))
 
@@ -252,8 +252,8 @@ def test_add_download_detects_existing_base32_magnet_hash(monkeypatch):
 def test_add_download_skips_qbittorrent_add_when_torrent_already_exists(monkeypatch):
     _reset_fakes()
     FakeQbittorrentClient.existing_hashes = [INFO_HASH.upper()]
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     asyncio.run(add_download_to_qbittorrent("http://prowlarr.test/1/download?link=abc", _settings()))
 
@@ -265,8 +265,8 @@ def test_add_download_treats_duplicate_result_as_success_when_torrent_exists_aft
     _reset_fakes()
     FakeQbittorrentClient.hashes_after_add = [INFO_HASH]
     FakeQbittorrentClient.add_result = "Fails."
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     asyncio.run(
         add_download_to_qbittorrent(
@@ -287,8 +287,8 @@ def test_add_download_treats_duplicate_result_as_success_when_torrent_exists_aft
 
 def test_add_download_does_not_duplicate_existing_prowlarr_api_key(monkeypatch):
     _reset_fakes()
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     asyncio.run(add_download_to_qbittorrent("http://prowlarr.test/1/download?link=abc&apikey=already", _settings()))
 
@@ -297,8 +297,8 @@ def test_add_download_does_not_duplicate_existing_prowlarr_api_key(monkeypatch):
 
 def test_torrent_file_cache_evicts_oldest_entry_when_full(monkeypatch):
     _reset_fakes()
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     for index in range(_TORRENT_FILE_CACHE_MAX_ENTRIES):
         _TORRENT_FILE_CACHE[f"http://prowlarr.test/{index}/download?apikey=secret"] = TORRENT_CONTENT
@@ -313,8 +313,8 @@ def test_torrent_file_cache_evicts_oldest_entry_when_full(monkeypatch):
 def test_add_download_returns_qbittorrent_status_for_added_torrent(monkeypatch):
     _reset_fakes()
     FakeQbittorrentClient.hashes_after_add = [INFO_HASH]
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     status = asyncio.run(add_download_to_qbittorrent("http://prowlarr.test/1/download?link=abc", _settings()))
 
@@ -338,7 +338,7 @@ def test_torrent_status_falls_back_to_save_path_and_name_for_content_path(monkey
             "content_path": None,
         }
     }
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
     status = asyncio.run(get_download_status_from_qbittorrent(_settings(), INFO_HASH))
 
@@ -358,7 +358,7 @@ def test_incomplete_torrent_status_does_not_expose_future_content_path(monkeypat
             "content_path": None,
         }
     }
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
     status = asyncio.run(get_download_status_from_qbittorrent(_settings(), INFO_HASH))
 
@@ -369,8 +369,8 @@ def test_incomplete_torrent_status_does_not_expose_future_content_path(monkeypat
 def test_add_download_tags_new_torrent_for_requester(monkeypatch):
     _reset_fakes()
     FakeQbittorrentClient.hashes_after_add = [INFO_HASH]
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     asyncio.run(
         add_download_to_qbittorrent(
@@ -398,8 +398,8 @@ def test_add_download_tags_new_torrent_for_requester(monkeypatch):
 def test_add_download_tags_existing_torrent_for_new_requester(monkeypatch):
     _reset_fakes()
     FakeQbittorrentClient.existing_hashes = [INFO_HASH]
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     asyncio.run(
         add_download_to_qbittorrent(
@@ -421,8 +421,8 @@ def test_add_download_tags_existing_torrent_for_new_requester(monkeypatch):
 def test_add_download_applies_optional_retention_policy_to_new_torrent(monkeypatch):
     _reset_fakes()
     FakeQbittorrentClient.hashes_after_add = [INFO_HASH]
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     settings = _settings()
     settings.retention_enabled = True
@@ -450,8 +450,8 @@ def test_add_download_applies_optional_retention_policy_to_new_torrent(monkeypat
 def test_add_download_applies_optional_retention_policy_to_existing_torrent(monkeypatch):
     _reset_fakes()
     FakeQbittorrentClient.existing_hashes = [INFO_HASH]
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
-    monkeypatch.setattr("app.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
 
     settings = _settings()
     settings.retention_enabled = True
@@ -484,7 +484,7 @@ def test_list_downloads_filters_by_requester_tag(monkeypatch):
         INFO_HASH: {"requester.telegram-123456789"},
         "otherhash": {"requester.telegram-12345"},
     }
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
     downloads = asyncio.run(list_downloads_from_qbittorrent(_settings(), requester_id="telegram:123456789"))
 
@@ -497,7 +497,7 @@ def test_get_download_status_respects_requester_tag_filter(monkeypatch):
     FakeQbittorrentClient.torrent_tags_by_hash = {
         INFO_HASH: {"requester.telegram-123456789"},
     }
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
     status = asyncio.run(
         get_download_status_from_qbittorrent(
@@ -516,7 +516,7 @@ def test_pause_download_requires_matching_requester_tag(monkeypatch):
     FakeQbittorrentClient.torrent_tags_by_hash = {
         INFO_HASH: {"requester.telegram-123456789"},
     }
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
     status = asyncio.run(
         pause_download_in_qbittorrent(
@@ -537,7 +537,7 @@ def test_resume_download_requires_matching_requester_tag(monkeypatch):
     FakeQbittorrentClient.torrent_tags_by_hash = {
         INFO_HASH: {"requester.telegram-123456789"},
     }
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
     FakeQbittorrentClient.torrent_overrides_by_hash = {
         INFO_HASH: {"state": "pausedDL"},
@@ -562,7 +562,7 @@ def test_delete_download_requires_matching_requester_tag_and_keeps_files(monkeyp
     FakeQbittorrentClient.torrent_tags_by_hash = {
         INFO_HASH: {"requester.telegram-123456789"},
     }
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
     status = asyncio.run(
         delete_download_from_qbittorrent(
@@ -587,7 +587,7 @@ def test_download_control_does_not_touch_torrent_for_wrong_requester(monkeypatch
     FakeQbittorrentClient.torrent_tags_by_hash = {
         INFO_HASH: {"requester.telegram-123456789"},
     }
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
     status = asyncio.run(
         pause_download_in_qbittorrent(
@@ -629,7 +629,7 @@ def test_cleanup_completed_downloads_removes_only_old_qbitlarr_tasks_without_fil
         "oldmanual": {"progress": 1.0, "state": "uploading", "completion_on": old_completion},
         "incomplete": {"progress": 0.9, "state": "downloading", "completion_on": -1},
     }
-    monkeypatch.setattr("app.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
     settings = _settings()
     settings.cleanup_enabled = True

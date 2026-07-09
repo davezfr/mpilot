@@ -375,7 +375,7 @@ def translate_cues(source_cues: List[Cue], options: TranslationOptions) -> Trans
         completed_chunks=0,
         max_concurrent_chunks=max_concurrent_chunks,
     )
-    work_dir = options.work_dir or Path(tempfile.mkdtemp(prefix="babelarr."))
+    work_dir = options.work_dir or Path(tempfile.mkdtemp(prefix="mpilot.subtitles."))
     cleanup = options.work_dir is None and not options.keep_work_dir
     work_dir.mkdir(parents=True, exist_ok=True)
     schema_path = work_dir / "translation.schema.json"

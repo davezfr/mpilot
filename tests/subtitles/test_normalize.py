@@ -2,8 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from babelarr.normalize import normalize_to_srt, parse_microdvd_text
-from babelarr.srt import Cue
+from mpilot.subtitles.normalize import normalize_to_srt, parse_microdvd_text
+from mpilot.subtitles.srt import Cue
 
 
 class NormalizeTests(unittest.TestCase):

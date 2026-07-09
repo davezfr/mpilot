@@ -21,6 +21,7 @@ from mpilot.api.search import router as search_router
 from mpilot.acquisition.config import Settings, get_settings
 from mpilot.acquisition.domain.quality import calculate_score
 from mpilot.acquisition.domain.search_results import build_prowlarr_search_params, normalize_search_results
+from mpilot.acquisition.env import env_first as acquisition_env_first
 from mpilot.acquisition.exceptions import ConfigurationError, UpstreamServiceError
 from mpilot.acquisition.models import (
     DownloadRequest,
@@ -54,15 +55,15 @@ logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
-logger = logging.getLogger("qbitlarr-api")
+logger = logging.getLogger("mpilot.acquisition.api")
 
-app = FastAPI(title="qBitlarr API")
+app = FastAPI(title="MPilot Acquisition API")
 _cleanup_task: asyncio.Task | None = None
 
 
 @app.middleware("http")
 async def require_api_key(request: Request, call_next):
-    expected_api_key = os.getenv("QBITLARR_API_KEY", "").strip()
+    expected_api_key = (acquisition_env_first("QBITLARR_API_KEY", default="") or "").strip()
     if expected_api_key:
         provided_api_key = request.headers.get("X-API-Key", "")
         if not compare_digest(provided_api_key, expected_api_key):
@@ -110,7 +111,7 @@ async def _cleanup_completed_downloads_loop(
                 summary = await cleanup_func(settings)
                 deleted_count = int(summary.get("deleted_count", 0))
                 if deleted_count:
-                    logger.info("Cleaned up %s completed qBitlarr torrent task(s)", deleted_count)
+                    logger.info("Cleaned up %s completed MPilot acquisition torrent task(s)", deleted_count)
             except asyncio.CancelledError:
                 raise
             except UpstreamServiceError as exc:
@@ -121,7 +122,7 @@ async def _cleanup_completed_downloads_loop(
             snapshot_summary = await snapshot_prune_func(settings)
             snapshot_deleted_count = int(snapshot_summary.get("deleted_count", 0))
             if snapshot_deleted_count:
-                logger.info("Pruned %s qBitlarr query snapshot(s)", snapshot_deleted_count)
+                logger.info("Pruned %s MPilot acquisition query snapshot(s)", snapshot_deleted_count)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -148,13 +149,13 @@ app.include_router(query_snapshots_router)
 
 @app.get(
     "/health",
-    operation_id="qbitlarr_health",
-    summary="Check qBitlarr API health",
-    tags=["qbitlarr"],
+    operation_id="acquisition_health",
+    summary="Check MPilot acquisition API health",
+    tags=["acquisition"],
 )
 async def health(deep: bool = False):
     if not deep:
-        return {"status": "ok", "service": "qBitlarr API"}
+        return {"status": "ok", "service": "MPilot Acquisition API"}
 
     try:
         settings = get_settings()
@@ -163,7 +164,7 @@ async def health(deep: bool = False):
             status_code=503,
             content={
                 "status": "degraded",
-                "service": "qBitlarr API",
+                "service": "MPilot Acquisition API",
                 "dependencies": {
                     "config": {"status": "error", "detail": str(exc)},
                 },
@@ -179,7 +180,7 @@ async def health(deep: bool = False):
     status = "ok" if all(item.get("status") == "ok" for item in dependencies.values()) else "degraded"
     payload = {
         "status": status,
-        "service": "qBitlarr API",
+        "service": "MPilot Acquisition API",
         "dependencies": dependencies,
     }
     if status != "ok":
@@ -187,25 +188,28 @@ async def health(deep: bool = False):
     return payload
 
 
-QBITLARR_MCP_OPERATIONS = [
-    "qbitlarr_download",
-    "qbitlarr_get_query_snapshot",
-    "qbitlarr_get_download_status",
-    "qbitlarr_handle",
-    "qbitlarr_health",
-    "qbitlarr_list_downloads",
-    "qbitlarr_list_prowlarr_indexers",
-    "qbitlarr_render_download_status",
-    "qbitlarr_render_downloads_status",
-    "qbitlarr_search",
+ACQUISITION_MCP_OPERATIONS = [
+    "acquisition_delete_download",
+    "acquisition_download",
+    "acquisition_get_download_status",
+    "acquisition_get_query_snapshot",
+    "acquisition_handle",
+    "acquisition_health",
+    "acquisition_list_downloads",
+    "acquisition_list_indexers",
+    "acquisition_pause_download",
+    "acquisition_render_download_status",
+    "acquisition_render_downloads_status",
+    "acquisition_resume_download",
+    "acquisition_search",
 ]
 
 
 mcp = FastApiMCP(
     app,
-    name="qBitlarr",
+    name="MPilot Acquisition",
     description="Safely search movie and TV requests and add selected downloads to qBittorrent.",
-    include_operations=QBITLARR_MCP_OPERATIONS,
+    include_operations=ACQUISITION_MCP_OPERATIONS,
 )
 mcp.mount_http(mount_path="/mcp")
 

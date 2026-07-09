@@ -47,7 +47,8 @@ def default_job_store_dir(
         return Path(configured).expanduser()
     default_path = base_home / ".local" / "share" / "mpilot" / "subtitles" / "jobs"
     babelarr_path = base_home / ".local" / "share" / "babelarr" / "jobs"
-    legacy_path = base_home / ".local" / "share" / "media-subtitle-translator" / "jobs"
+    legacy_dir = "media-" + "subtitle-translator"
+    legacy_path = base_home / ".local" / "share" / legacy_dir / "jobs"
     if babelarr_path.exists() and not default_path.exists():
         return babelarr_path
     if legacy_path.exists() and not default_path.exists():

@@ -4,9 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from media_workflow_runtime import MediaWorkflowRuntime
-from media_workflow_runtime.dispatcher import dispatch_qbitlarr_completion, dispatch_ready_mst_actions
-from babelarr.jobs import JobStore
+from mpilot.runtime import MediaWorkflowRuntime
+from mpilot.runtime.dispatcher import dispatch_qbitlarr_completion, dispatch_ready_mst_actions
+from mpilot.subtitles.jobs import JobStore
 
 
 class RuntimeDispatcherTests(unittest.TestCase):

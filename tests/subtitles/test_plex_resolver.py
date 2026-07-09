@@ -8,9 +8,9 @@ import urllib.parse
 from pathlib import Path
 from unittest.mock import patch
 
-from babelarr import cli as cli_module
-from babelarr.cli import build_parser, summary_from_args
-from babelarr.plex_resolver import (
+from mpilot.subtitles import cli as cli_module
+from mpilot.subtitles.cli import build_parser, summary_from_args
+from mpilot.subtitles.plex_resolver import (
     PathMapping,
     PlexApiError,
     PlexApiClient,
@@ -453,7 +453,7 @@ class PlexResolverTests(unittest.TestCase):
         env.pop("PLEX_TOKEN", None)
         env["MST_NO_DOTENV"] = "1"
         result = subprocess.run(
-            [sys.executable, "-m", "babelarr", "plex-resolve", "--rating-key", "101"],
+            [sys.executable, "-m", "mpilot.subtitles", "plex-resolve", "--rating-key", "101"],
             text=True,
             capture_output=True,
             env=env,

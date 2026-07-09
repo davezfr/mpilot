@@ -1,7 +1,7 @@
 import unittest
 
-from babelarr.providers.base import SubtitleCandidate
-from babelarr.subtitle_matching import (
+from mpilot.subtitles.providers.base import SubtitleCandidate
+from mpilot.subtitles.subtitle_matching import (
     ReleaseInfo,
     confidence_for_score,
     parse_release_info,

@@ -7,16 +7,16 @@ import httpx
 from mpilot.acquisition.env import env_first
 
 
-DEFAULT_QBITLARR_API_URL = "http://127.0.0.1:8000"
+DEFAULT_ACQUISITION_API_URL = "http://127.0.0.1:8000"
 
 
-class QbitlarrApiError(RuntimeError):
+class AcquisitionApiError(RuntimeError):
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
 
 
-class QbitlarrApiClient:
+class AcquisitionApiClient:
     def __init__(
         self,
         api_url: str,
@@ -49,7 +49,7 @@ class QbitlarrApiClient:
             },
         )
         if not isinstance(response, list):
-            raise QbitlarrApiError("qBitlarr API returned an unexpected search response")
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected search response")
         return response
 
     async def download(
@@ -70,7 +70,7 @@ class QbitlarrApiClient:
             },
         )
         if not isinstance(response, dict):
-            raise QbitlarrApiError("qBitlarr API returned an unexpected download response")
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected download response")
         return response
 
     async def handle(
@@ -91,7 +91,7 @@ class QbitlarrApiClient:
             },
         )
         if not isinstance(response, dict):
-            raise QbitlarrApiError("qBitlarr API returned an unexpected handle response")
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected handle response")
         return response
 
     async def health(self, *, deep: bool = False) -> dict[str, Any]:
@@ -100,7 +100,7 @@ class QbitlarrApiClient:
             kwargs["params"] = {"deep": "true"}
         response = await self._request("GET", "/health", **kwargs)
         if not isinstance(response, dict):
-            raise QbitlarrApiError("qBitlarr API returned an unexpected health response")
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected health response")
         return response
 
     async def list_downloads(self, user_id: str | None = None) -> list[dict[str, Any]]:
@@ -109,7 +109,7 @@ class QbitlarrApiClient:
             kwargs["params"] = {"user_id": user_id}
         response = await self._request("GET", "/downloads", **kwargs)
         if not isinstance(response, list):
-            raise QbitlarrApiError("qBitlarr API returned an unexpected downloads response")
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected downloads response")
         return response
 
     async def get_download_status(self, info_hash: str, user_id: str | None = None) -> dict[str, Any]:
@@ -118,7 +118,7 @@ class QbitlarrApiClient:
             kwargs["params"] = {"user_id": user_id}
         response = await self._request("GET", f"/downloads/{info_hash}", **kwargs)
         if not isinstance(response, dict):
-            raise QbitlarrApiError("qBitlarr API returned an unexpected download status response")
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected download status response")
         return response
 
     async def render_downloads_status(self, user_id: str | None = None) -> dict[str, Any]:
@@ -127,7 +127,7 @@ class QbitlarrApiClient:
             kwargs["params"] = {"user_id": user_id}
         response = await self._request("GET", "/downloads/status-message", **kwargs)
         if not isinstance(response, dict):
-            raise QbitlarrApiError("qBitlarr API returned an unexpected rendered downloads response")
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected rendered downloads response")
         return response
 
     async def render_download_status(self, info_hash: str, user_id: str | None = None) -> dict[str, Any]:
@@ -136,7 +136,7 @@ class QbitlarrApiClient:
             kwargs["params"] = {"user_id": user_id}
         response = await self._request("GET", f"/downloads/{info_hash}/status-message", **kwargs)
         if not isinstance(response, dict):
-            raise QbitlarrApiError("qBitlarr API returned an unexpected rendered download status response")
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected rendered download status response")
         return response
 
     async def pause_download(self, info_hash: str, user_id: str) -> dict[str, Any]:
@@ -155,19 +155,19 @@ class QbitlarrApiClient:
             params={"user_id": user_id},
         )
         if not isinstance(response, dict):
-            raise QbitlarrApiError("qBitlarr API returned an unexpected download control response")
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected download control response")
         return response
 
     async def get_query_snapshot(self, query_id: str) -> dict[str, Any]:
         response = await self._request("GET", f"/queries/{query_id}")
         if not isinstance(response, dict):
-            raise QbitlarrApiError("qBitlarr API returned an unexpected query snapshot response")
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected query snapshot response")
         return response
 
     async def list_prowlarr_indexers(self) -> list[dict[str, Any]]:
         response = await self._request("GET", "/prowlarr/indexers")
         if not isinstance(response, list):
-            raise QbitlarrApiError("qBitlarr API returned an unexpected Prowlarr indexer response")
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected Prowlarr indexer response")
         return response
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
@@ -183,22 +183,22 @@ class QbitlarrApiClient:
                 response = await client.request(method, path, headers=headers, **kwargs)
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
-                raise QbitlarrApiError(
+                raise AcquisitionApiError(
                     _extract_error_detail(exc.response),
                     status_code=exc.response.status_code,
                 ) from exc
             except httpx.RequestError as exc:
-                raise QbitlarrApiError(f"qBitlarr API is unreachable: {exc.__class__.__name__}") from exc
+                raise AcquisitionApiError(f"MPilot acquisition API is unreachable: {exc.__class__.__name__}") from exc
 
         try:
             return response.json()
         except ValueError as exc:
-            raise QbitlarrApiError("qBitlarr API returned invalid JSON") from exc
+            raise AcquisitionApiError("MPilot acquisition API returned invalid JSON") from exc
 
 
-def get_qbitlarr_client() -> QbitlarrApiClient:
-    return QbitlarrApiClient(
-        api_url=env_first("QBITLARR_API_URL", default=DEFAULT_QBITLARR_API_URL) or DEFAULT_QBITLARR_API_URL,
+def get_acquisition_client() -> AcquisitionApiClient:
+    return AcquisitionApiClient(
+        api_url=env_first("QBITLARR_API_URL", default=DEFAULT_ACQUISITION_API_URL) or DEFAULT_ACQUISITION_API_URL,
         api_key=env_first("QBITLARR_API_KEY"),
         timeout=float(env_first("QBITLARR_API_TIMEOUT_SECONDS", default="90") or "90"),
     )
@@ -208,11 +208,11 @@ def _extract_error_detail(response: httpx.Response) -> str:
     try:
         payload = response.json()
     except ValueError:
-        return f"qBitlarr API returned HTTP {response.status_code}"
+        return f"MPilot acquisition API returned HTTP {response.status_code}"
 
     if isinstance(payload, dict):
         detail = payload.get("detail")
         if isinstance(detail, str) and detail.strip():
             return detail.strip()
 
-    return f"qBitlarr API returned HTTP {response.status_code}"
+    return f"MPilot acquisition API returned HTTP {response.status_code}"

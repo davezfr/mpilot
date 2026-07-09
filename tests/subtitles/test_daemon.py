@@ -6,12 +6,12 @@ import unittest
 from pathlib import Path
 
 from mpilot.daemon import acquire_daemon_lock, release_daemon_lock, run_daemon, run_daemon_once
-from mpilot.mcp.qbitlarr_notifications import DownloadCompletionNotifier, DownloadWatchStore
+from mpilot.mcp.acquisition_notifications import DownloadCompletionNotifier, DownloadWatchStore
 from mpilot.runtime import MediaWorkflowRuntime
 from mpilot.runtime.dispatcher import dispatch_qbitlarr_completion
 
 
-class FakeQbitlarrClient:
+class FakeAcquisitionClient:
     async def get_download_status(self, _info_hash):
         return {
             "name": "Example.Movie.2026.1080p.WEB-DL.H.264-GRP",
@@ -22,7 +22,7 @@ class FakeQbitlarrClient:
         }
 
 
-class FailingQbitlarrNotifier:
+class FailingAcquisitionNotifier:
     async def poll_once(self):
         raise RuntimeError("temporary qBitlarr failure")
 
@@ -75,15 +75,15 @@ class DaemonTests(unittest.TestCase):
             )
             notifier = DownloadCompletionNotifier(
                 store=store,
-                client=FakeQbitlarrClient(),
+                client=FakeAcquisitionClient(),
                 send_message=send_message,
                 completion_hook=completion_hook,
             )
 
             summary = asyncio.run(
                 run_daemon_once(
-                    qbitlarr_notifier=notifier,
-                    run_babelarr_notifications_step=False,
+                    acquisition_notifier=notifier,
+                    run_subtitle_notifications_step=False,
                     run_runtime_dispatch=False,
                 )
             )
@@ -105,8 +105,8 @@ class DaemonTests(unittest.TestCase):
                 payload = run_daemon(
                     once=True,
                     lock_path=lock_path,
-                    run_qbitlarr=False,
-                    run_babelarr_notifications_step=False,
+                    run_acquisition=False,
+                    run_subtitle_notifications_step=False,
                     run_runtime_dispatch=False,
                 )
             finally:
@@ -124,15 +124,15 @@ class DaemonTests(unittest.TestCase):
 
         summary = asyncio.run(
             run_daemon_once(
-                qbitlarr_notifier=FailingQbitlarrNotifier(),
-                run_babelarr_notifications_step=False,
+                acquisition_notifier=FailingAcquisitionNotifier(),
+                run_subtitle_notifications_step=False,
                 runtime=MediaWorkflowRuntime(Path(tempfile.mkdtemp())),
                 runtime_dispatcher=fake_runtime_dispatcher,
             )
         )
 
         self.assertEqual(summary["status"], "partial_failure")
-        self.assertEqual(summary["errors"][0]["name"], "qbitlarr_downloads")
+        self.assertEqual(summary["errors"][0]["name"], "acquisition_downloads")
         self.assertEqual(dispatch_calls, ["runtime"])
 
 

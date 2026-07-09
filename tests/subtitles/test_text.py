@@ -1,6 +1,6 @@
 import unittest
 
-from babelarr.text import flatten_subtitle_lines, strip_terminal_statement_punctuation
+from mpilot.subtitles.text import flatten_subtitle_lines, strip_terminal_statement_punctuation
 
 
 class TextTests(unittest.TestCase):

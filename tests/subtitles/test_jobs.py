@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from babelarr import cli as cli_module
-from babelarr.cli import (
+from mpilot.subtitles import cli as cli_module
+from mpilot.subtitles.cli import (
     build_parser,
     job_create_summary,
     job_create_video_summary,
@@ -19,15 +19,15 @@ from babelarr.cli import (
     translate_plex_args_from_job,
     translate_video_args_from_job,
 )
-from babelarr.jobs import (
+from mpilot.subtitles.jobs import (
     JobNeedsConfirmation,
     JobStore,
     JobStoreError,
     default_job_store_dir,
     run_job,
 )
-from babelarr.notifications import JobNotificationStore
-from media_workflow_runtime import MediaWorkflowRuntime
+from mpilot.subtitles.notifications import JobNotificationStore
+from mpilot.runtime import MediaWorkflowRuntime
 
 
 def sample_request():
@@ -657,7 +657,7 @@ class JobStoreTests(unittest.TestCase):
                     "MST_RUNTIME_TASK_ID": task_id,
                 },
                 clear=False,
-            ), patch("media_workflow_runtime.dispatcher.dispatch_ready_mst_actions", return_value={"status": "ok"}) as dispatch:
+            ), patch("mpilot.runtime.dispatcher.dispatch_ready_mst_actions", return_value={"status": "ok"}) as dispatch:
                 job_run_summary(args, executor=executor)
 
             dispatch.assert_called_once()
@@ -759,13 +759,13 @@ class JobStoreTests(unittest.TestCase):
                 {"MPILOT_SUBTITLE_JOB_NOTIFICATION_INITIAL_DELAY_SECONDS": "45"},
                 clear=False,
             ), patch(
-                "babelarr.notifications.JobCompletionNotifier.from_env",
+                "mpilot.subtitles.notifications.JobCompletionNotifier.from_env",
                 return_value=FakeNotifier(),
             ), patch(
-                "babelarr.notifications.start_notification_daemon_from_env",
+                "mpilot.subtitles.notifications.start_notification_daemon_from_env",
                 side_effect=lambda: notification_calls.append(("start_daemon", None)),
             ), patch(
-                "babelarr.notifications.touch_notification_wake_file",
+                "mpilot.subtitles.notifications.touch_notification_wake_file",
                 side_effect=lambda: notification_calls.append(("wake", None)),
             ):
                 summary = job_start_summary(args, popen=fake_popen)
@@ -804,13 +804,13 @@ class JobStoreTests(unittest.TestCase):
                 "MST_JOB_NOTIFICATION_WATCHES_PATH": str(Path(tmp) / "watches.json"),
             }
             with patch.dict(os.environ, env, clear=False), patch(
-                "babelarr.notifications.JobCompletionNotifier.from_env",
+                "mpilot.subtitles.notifications.JobCompletionNotifier.from_env",
                 side_effect=AssertionError("worker must not start its own notifier"),
             ), patch(
-                "babelarr.notifications.touch_notification_wake_file",
+                "mpilot.subtitles.notifications.touch_notification_wake_file",
                 side_effect=lambda: calls.append(("wake", None)),
             ), patch(
-                "babelarr.notifications.start_notification_daemon_from_env",
+                "mpilot.subtitles.notifications.start_notification_daemon_from_env",
                 side_effect=lambda: calls.append(("start_daemon", None)),
             ):
                 summary = job_run_summary(args, executor=lambda _current, _args: {"output": "/media/Movie.zh.ass"})
@@ -835,10 +835,10 @@ class JobStoreTests(unittest.TestCase):
 
             env = {"MST_JOB_NOTIFICATION_WATCHES_PATH": str(watches_path)}
             with patch.dict(os.environ, env, clear=False), patch(
-                "babelarr.notifications.touch_notification_wake_file",
+                "mpilot.subtitles.notifications.touch_notification_wake_file",
                 side_effect=lambda: calls.append(("wake", None)),
             ), patch(
-                "babelarr.notifications.start_notification_daemon_from_env",
+                "mpilot.subtitles.notifications.start_notification_daemon_from_env",
                 side_effect=lambda: calls.append(("start_daemon", None)),
             ):
                 summary = job_run_summary(args, executor=lambda _current, _args: {"output": "/media/Movie.zh.ass"})
@@ -875,7 +875,7 @@ class JobStoreTests(unittest.TestCase):
             ]
         )
         with patch(
-            "babelarr.notifications.run_notification_daemon",
+            "mpilot.subtitles.notifications.run_notification_daemon",
             return_value={"status": "ran_once"},
         ) as run:
             summary = cli_module.summary_from_args(args)

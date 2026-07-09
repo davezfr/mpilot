@@ -147,7 +147,7 @@ def add_plex_connection_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_parser(prog: str = "babelarr") -> argparse.ArgumentParser:
+def build_parser(prog: str = "mpilot subtitles") -> argparse.ArgumentParser:
     load_project_dotenv()
     default_download_priority = ",".join(DEFAULT_DOWNLOAD_PROVIDER_PRIORITY)
     default_provider_search_limit = _env_first_int("BABELARR_SUBTITLE_PROVIDER_SEARCH_LIMIT", "MST_SUBTITLE_PROVIDER_SEARCH_LIMIT", default=10)
@@ -1296,7 +1296,7 @@ def job_start_summary(args: argparse.Namespace, popen=subprocess.Popen) -> Dict[
     command = [
         sys.executable,
         "-m",
-        "babelarr",
+        "mpilot.subtitles",
         "job-run",
         "--job-store-dir",
         str(store.root),
@@ -2078,7 +2078,7 @@ def _local_search_root(args: argparse.Namespace) -> Optional[Path]:
     return Path(value) if value else None
 
 
-def main(argv=None, *, prog: str = "babelarr") -> int:
+def main(argv=None, *, prog: str = "mpilot subtitles") -> int:
     parser = build_parser(prog=prog)
     args = parser.parse_args(argv)
     try:
@@ -2098,5 +2098,5 @@ def main(argv=None, *, prog: str = "babelarr") -> int:
         return 2
     except Exception as error:
         print(summary_json(cli_error_summary(error, getattr(args, "command", None))))
-        print("babelarr: %s" % error, file=sys.stderr)
+        print("mpilot subtitles: %s" % error, file=sys.stderr)
         return 1

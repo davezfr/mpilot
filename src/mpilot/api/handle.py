@@ -56,7 +56,7 @@ from mpilot.acquisition.services.qbittorrent import (
 from mpilot.acquisition.services.wikidata import resolve_external_movie_id, search_movie_candidates
 
 
-logger = logging.getLogger("qbitlarr-api.handle")
+logger = logging.getLogger("mpilot.acquisition.api.handle")
 router = APIRouter()
 
 DEFAULT_MANUAL_RESULT_LIMIT = 4
@@ -91,13 +91,13 @@ MOVIE_CANDIDATE_LIMIT = 5
 @router.post(
     "/handle",
     response_model=HandleResponse,
-    operation_id="qbitlarr_handle",
+    operation_id="acquisition_handle",
     summary="Search or download a movie or TV show",
     description=(
-        "Use qBitlarr to handle one movie or TV request. IMDb IDs, URLs, and supported Douban/AlloCine "
+        "Use MPilot acquisition to handle one movie or TV request. IMDb IDs, URLs, and supported Douban/AlloCine "
         "links resolve to the canonical IMDb flow; by default all input returns ranked choices."
     ),
-    tags=["qbitlarr"],
+    tags=["acquisition"],
 )
 async def handle(request: HandleRequest, background_tasks: BackgroundTasks) -> HandleResponse:
     """Search movie or TV requests and either auto-download or return ranked choices."""

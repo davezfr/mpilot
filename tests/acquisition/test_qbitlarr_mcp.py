@@ -4,8 +4,8 @@ import json
 import httpx
 import pytest
 
-from app.client import QbitlarrApiClient, QbitlarrApiError, get_qbitlarr_client
-from mcp_server.server import _prepare_agent_handle_payload
+from mpilot.acquisition.client import AcquisitionApiClient, AcquisitionApiError, get_acquisition_client
+from mpilot.mcp.acquisition_helpers import _prepare_agent_handle_payload
 
 
 def test_agent_handle_payload_for_release_choices_uses_clarify_safe_fields():
@@ -148,7 +148,7 @@ def test_qbitlarr_api_client_search_posts_expected_payload():
             ],
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         api_key="secret-key",
         transport=httpx.MockTransport(handler),
@@ -182,7 +182,7 @@ def test_qbitlarr_api_client_download_posts_expected_payload():
         requests.append(request)
         return httpx.Response(200, json={"status": "success", "message": "Download queued"})
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test/",
         transport=httpx.MockTransport(handler),
     )
@@ -216,7 +216,7 @@ def test_qbitlarr_api_client_handle_posts_expected_payload():
             },
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test/",
         transport=httpx.MockTransport(handler),
     )
@@ -234,22 +234,22 @@ def test_qbitlarr_api_client_handle_posts_expected_payload():
     }
 
 
-def test_get_qbitlarr_client_default_timeout_allows_slow_verified_imdb_flow(monkeypatch):
+def test_get_acquisition_client_default_timeout_allows_slow_verified_imdb_flow(monkeypatch):
     monkeypatch.delenv("QBITLARR_API_TIMEOUT_SECONDS", raising=False)
     monkeypatch.delenv("QBITLARR_API_URL", raising=False)
 
-    client = get_qbitlarr_client()
+    client = get_acquisition_client()
 
     assert client.timeout == 90.0
 
 
-def test_get_qbitlarr_client_prefers_mpilot_acquisition_env(monkeypatch):
+def test_get_acquisition_client_prefers_mpilot_acquisition_env(monkeypatch):
     monkeypatch.setenv("MPILOT_ACQUISITION_API_URL", "http://mpilot-api:8000")
     monkeypatch.setenv("MPILOT_ACQUISITION_API_KEY", "mpilot-key")
     monkeypatch.setenv("MPILOT_ACQUISITION_API_TIMEOUT_SECONDS", "12")
     monkeypatch.setenv("QBITLARR_API_URL", "http://legacy-api:8000")
 
-    client = get_qbitlarr_client()
+    client = get_acquisition_client()
 
     assert client.api_url == "http://mpilot-api:8000"
     assert client.api_key == "mpilot-key"
@@ -260,16 +260,16 @@ def test_qbitlarr_api_client_health_gets_health_endpoint():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
         assert request.url == "http://qbitlarr.test/health"
-        return httpx.Response(200, json={"status": "ok", "service": "qBitlarr API"})
+        return httpx.Response(200, json={"status": "ok", "service": "MPilot acquisition API"})
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
 
     response = asyncio.run(client.health())
 
-    assert response == {"status": "ok", "service": "qBitlarr API"}
+    assert response == {"status": "ok", "service": "MPilot acquisition API"}
 
 
 def test_qbitlarr_api_client_deep_health_adds_query_parameter():
@@ -280,7 +280,7 @@ def test_qbitlarr_api_client_deep_health_adds_query_parameter():
             200,
             json={
                 "status": "ok",
-                "service": "qBitlarr API",
+                "service": "MPilot acquisition API",
                 "dependencies": {
                     "prowlarr": {"status": "ok"},
                     "qbittorrent": {"status": "ok"},
@@ -288,7 +288,7 @@ def test_qbitlarr_api_client_deep_health_adds_query_parameter():
             },
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -316,7 +316,7 @@ def test_qbitlarr_api_client_list_downloads_gets_downloads_endpoint():
             ],
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -346,7 +346,7 @@ def test_qbitlarr_api_client_list_downloads_can_filter_by_user_id():
             ],
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -372,7 +372,7 @@ def test_qbitlarr_api_client_get_download_status_gets_targeted_download_endpoint
             },
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -399,7 +399,7 @@ def test_qbitlarr_api_client_get_download_status_can_filter_by_user_id():
             },
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -429,7 +429,7 @@ def test_qbitlarr_api_client_render_downloads_status_gets_status_message_endpoin
             },
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -467,7 +467,7 @@ def test_qbitlarr_api_client_render_download_status_gets_single_status_message_e
             },
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -498,7 +498,7 @@ def test_qbitlarr_api_client_pause_download_posts_control_endpoint():
             },
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -529,7 +529,7 @@ def test_qbitlarr_api_client_resume_download_posts_control_endpoint():
             },
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -560,7 +560,7 @@ def test_qbitlarr_api_client_delete_download_posts_control_endpoint():
             },
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -587,7 +587,7 @@ def test_qbitlarr_api_client_list_prowlarr_indexers_gets_indexer_endpoint():
             ],
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -640,7 +640,7 @@ def test_qbitlarr_api_client_get_query_snapshot_gets_query_endpoint():
             },
         )
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
@@ -655,12 +655,12 @@ def test_qbitlarr_api_client_raises_clean_error_for_qbitlarr_failures():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(502, json={"detail": "Prowlarr is unreachable"})
 
-    client = QbitlarrApiClient(
+    client = AcquisitionApiClient(
         api_url="http://qbitlarr.test",
         transport=httpx.MockTransport(handler),
     )
 
-    with pytest.raises(QbitlarrApiError) as exc_info:
+    with pytest.raises(AcquisitionApiError) as exc_info:
         asyncio.run(client.search(query="ubuntu"))
 
     assert exc_info.value.status_code == 502

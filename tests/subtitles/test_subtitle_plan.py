@@ -2,10 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from babelarr.cli import build_parser
-from babelarr.planner import build_subtitle_plan, infer_sidecar_language
-from babelarr.plex_resolver import PlexResolvedMedia
-from babelarr.source import SubtitleStream
+from mpilot.subtitles.cli import build_parser
+from mpilot.subtitles.planner import build_subtitle_plan, infer_sidecar_language
+from mpilot.subtitles.plex_resolver import PlexResolvedMedia
+from mpilot.subtitles.source import SubtitleStream
 
 
 def resolved_for(video: Path) -> PlexResolvedMedia:

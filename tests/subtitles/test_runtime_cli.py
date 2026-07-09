@@ -6,8 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from babelarr.jobs import JobStore
-from media_workflow_runtime import cli as runtime_cli
+from mpilot.subtitles.jobs import JobStore
+from mpilot.runtime import cli as runtime_cli
 
 
 class RuntimeCliTests(unittest.TestCase):
@@ -28,7 +28,7 @@ class RuntimeCliTests(unittest.TestCase):
 
             recorded = runtime_cli.summary_from_argv(
                 [
-                    "record-qbitlarr-download",
+                    "record-acquisition-download",
                     "--runtime-store-dir",
                     str(store_dir),
                     "--requester-id",
@@ -71,7 +71,7 @@ class RuntimeCliTests(unittest.TestCase):
 
             claimed = runtime_cli.summary_from_argv(
                 [
-                    "claim-ready-babelarr-actions",
+                    "claim-ready-subtitle-job-actions",
                     "--runtime-store-dir",
                     str(store_dir),
                 ]
@@ -84,14 +84,14 @@ class RuntimeCliTests(unittest.TestCase):
 
             created = runtime_cli.summary_from_argv(
                 [
-                    "record-babelarr-job-created",
+                    "record-subtitle-job-created",
                     "--runtime-store-dir",
                     str(store_dir),
                     "--workflow-id",
                     workflow_id,
                     "--task-id",
                     task_id,
-                    "--babelarr-job-id",
+                    "--subtitle-job-id",
                     "job_123",
                 ]
             )
@@ -99,7 +99,7 @@ class RuntimeCliTests(unittest.TestCase):
 
             updated = runtime_cli.summary_from_argv(
                 [
-                    "record-babelarr-job-status",
+                    "record-subtitle-job-status",
                     "--runtime-store-dir",
                     str(store_dir),
                     "--workflow-id",
@@ -130,7 +130,7 @@ class RuntimeCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result = runtime_cli.summary_from_argv(
                 [
-                    "record-qbitlarr-download-with-subtitle-intent",
+                    "record-acquisition-download-with-subtitle-intent",
                     "--runtime-store-dir",
                     tmp,
                     "--requester-id",
@@ -229,14 +229,14 @@ class RuntimeCliTests(unittest.TestCase):
             workflow_id = recorded["workflow"]["workflow_id"]
             runtime_cli.summary_from_argv(
                 [
-                    "record-babelarr-job-created",
+                    "record-subtitle-job-created",
                     "--runtime-store-dir",
                     runtime_tmp,
                     "--workflow-id",
                     workflow_id,
                     "--task-id",
                     task_id,
-                    "--babelarr-job-id",
+                    "--subtitle-job-id",
                     job["job_id"],
                 ]
             )
@@ -278,7 +278,7 @@ class RuntimeCliTests(unittest.TestCase):
             ) as dispatch:
                 result = runtime_cli.summary_from_argv(
                     [
-                        "handle-qbitlarr-completion",
+                        "handle-acquisition-completion",
                         "--runtime-store-dir",
                         tmp,
                         "--event-json",
@@ -311,7 +311,7 @@ class RuntimeCliTests(unittest.TestCase):
             ) as dispatch:
                 result = runtime_cli.summary_from_argv(
                     [
-                        "handle-qbitlarr-completion",
+                        "handle-acquisition-completion",
                         "--runtime-store-dir",
                         tmp,
                         "--event-json",
@@ -334,7 +334,7 @@ class RuntimeCliTests(unittest.TestCase):
             store_dir = Path(tmp)
             recorded = runtime_cli.summary_from_argv(
                 [
-                    "record-qbitlarr-download-with-subtitle-intent",
+                    "record-acquisition-download-with-subtitle-intent",
                     "--runtime-store-dir",
                     str(store_dir),
                     "--requester-id",
@@ -356,11 +356,11 @@ class RuntimeCliTests(unittest.TestCase):
             with patch.object(runtime_cli, "dispatch_qbitlarr_completion") as dispatch:
                 result = runtime_cli.summary_from_argv(
                     [
-                        "handle-qbitlarr-completion",
+                        "handle-acquisition-completion",
                         "--runtime-store-dir",
                         str(store_dir),
                         "--event-json",
-                        '{"event":"download_removed","info_hash":"abc123","error":{"type":"QbitlarrApiError","message":"Download not found"}}',
+                        '{"event":"download_removed","info_hash":"abc123","error":{"type":"AcquisitionApiError","message":"Download not found"}}',
                     ]
                 )
 
@@ -383,7 +383,7 @@ class RuntimeCliTests(unittest.TestCase):
             with patch.object(sys.stdin, "isatty", return_value=True):
                 result = runtime_cli.summary_from_argv(
                     [
-                        "handle-qbitlarr-completion",
+                        "handle-acquisition-completion",
                         "--runtime-store-dir",
                         tmp,
                     ]
@@ -442,7 +442,7 @@ class RuntimeCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result = runtime_cli.summary_from_argv(
                 [
-                    "record-qbitlarr-download",
+                    "record-acquisition-download",
                     "--runtime-store-dir",
                     tmp,
                     "--requester-id",

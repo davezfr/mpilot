@@ -10,16 +10,16 @@ from mpilot.acquisition.models import ProwlarrIndexer
 from mpilot.acquisition.services.prowlarr import list_prowlarr_indexers
 
 
-logger = logging.getLogger("qbitlarr-api.prowlarr-indexers")
+logger = logging.getLogger("mpilot.acquisition.api.prowlarr-indexers")
 router = APIRouter()
 
 
 @router.get(
     "/prowlarr/indexers",
     response_model=list[ProwlarrIndexer],
-    operation_id="qbitlarr_list_prowlarr_indexers",
+    operation_id="acquisition_list_indexers",
     summary="List configured Prowlarr indexers",
-    tags=["qbitlarr"],
+    tags=["acquisition"],
 )
 async def prowlarr_indexers() -> list[ProwlarrIndexer]:
     try:

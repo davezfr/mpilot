@@ -7,7 +7,7 @@ from . import cli as cli_module
 from .provider_policy import LowConfidenceSubtitleCandidatesError
 
 
-SERVER_NAME = "babelarr"
+SERVER_NAME = "mpilot-subtitles"
 SERVER_INSTRUCTIONS = (
     "Resolve Plex media by ID or title, plan subtitle availability, create and "
     "run persistent subtitle translation jobs, and write Plex-compatible "
@@ -569,7 +569,7 @@ def main() -> int:
     try:
         create_mcp_server().run()
     except RuntimeError as error:
-        print("babelarr MCP: %s" % error, file=sys.stderr)
+        print("MPilot subtitles MCP: %s" % error, file=sys.stderr)
         return 1
     return 0
 

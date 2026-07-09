@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from app.domain.download_progress import (
+from mpilot.acquisition.domain.download_progress import (
     dynamic_progress_watch_policy,
     render_download_status_payload,
     render_download_status,
     render_downloads_status,
     render_tracking_expired_status,
 )
-from app.models import TorrentStatus
+from mpilot.acquisition.models import TorrentStatus
 
 
 def test_render_download_status_returns_chat_progress_bar():
@@ -86,7 +86,7 @@ def test_dynamic_progress_watch_policy_is_bounded_to_fifteen_minutes():
 
 
 def test_render_download_status_handles_qbittorrent_v5_stopped_state():
-    from app.models import TorrentStatus
+    from mpilot.acquisition.models import TorrentStatus
 
     status = TorrentStatus(
         name="paused.iso",

@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from mpilot.mcp.qbitlarr_notifications import DownloadCompletionNotifier
+from mpilot.mcp.acquisition_notifications import DownloadCompletionNotifier
 from mpilot.runtime import MediaWorkflowRuntime
 from mpilot.runtime.cli import default_runtime_store_dir
 from mpilot.runtime.dispatcher import dispatch_ready_babelarr_actions
@@ -58,25 +58,25 @@ def release_daemon_lock(handle: Any) -> None:
 
 async def run_daemon_once(
     *,
-    qbitlarr_notifier: DownloadCompletionNotifier | None = None,
-    run_qbitlarr: bool = True,
-    run_babelarr_notifications_step: bool = True,
+    acquisition_notifier: DownloadCompletionNotifier | None = None,
+    run_acquisition: bool = True,
+    run_subtitle_notifications_step: bool = True,
     run_runtime_dispatch: bool = True,
     runtime_store_dir: str | Path | None = None,
     job_store_dir: str | Path | None = None,
     runtime: MediaWorkflowRuntime | None = None,
     runtime_dispatcher: Callable[..., dict[str, Any]] | None = None,
-    babelarr_notification_step: Callable[[], dict[str, Any]] | None = None,
+    subtitle_notification_step: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     steps: list[StepResult] = []
 
-    if run_qbitlarr:
-        notifier = qbitlarr_notifier or DownloadCompletionNotifier.from_env()
-        steps.append(await _run_async_step("qbitlarr_downloads", notifier.poll_once))
+    if run_acquisition:
+        notifier = acquisition_notifier or DownloadCompletionNotifier.from_env()
+        steps.append(await _run_async_step("acquisition_downloads", notifier.poll_once))
 
-    if run_babelarr_notifications_step:
-        step = babelarr_notification_step or _default_babelarr_notification_step
-        steps.append(await _run_sync_step("babelarr_notifications", step))
+    if run_subtitle_notifications_step:
+        step = subtitle_notification_step or _default_subtitle_notification_step
+        steps.append(await _run_sync_step("subtitle_notifications", step))
 
     if run_runtime_dispatch:
         active_runtime = runtime or MediaWorkflowRuntime(
@@ -140,7 +140,7 @@ async def _run_sync_step(name: str, callback: Callable[[], Any]) -> StepResult:
     return {"name": name, "status": "ok", "result": result}
 
 
-def _default_babelarr_notification_step() -> dict[str, Any]:
+def _default_subtitle_notification_step() -> dict[str, Any]:
     return run_notification_daemon(run_once=True, lock_acquire_timeout_seconds=0.0)
 
 

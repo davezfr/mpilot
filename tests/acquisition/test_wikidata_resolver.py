@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import httpx
 
-from app.domain.quality import extract_external_movie_id
-from app.services.wikidata import resolve_external_movie_id, search_movie_candidates
+from mpilot.acquisition.domain.quality import extract_external_movie_id
+from mpilot.acquisition.services.wikidata import resolve_external_movie_id, search_movie_candidates
 
 
 class FakeWikidataResponse:
@@ -85,7 +85,7 @@ def test_resolve_external_movie_id_maps_douban_to_imdb_via_wikidata(monkeypatch)
         }
     }
 
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
 
     result = asyncio.run(resolve_external_movie_id("https://movie.douban.com/subject/1292052/", _settings()))
 
@@ -101,7 +101,7 @@ def test_resolve_external_movie_id_maps_douban_to_imdb_via_wikidata(monkeypatch)
 
 def test_resolve_external_movie_id_returns_unresolved_for_known_allocine_input_without_match(monkeypatch):
     _reset_fakes()
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
 
     result = asyncio.run(
         resolve_external_movie_id("https://www.allocine.fr/film/fichefilm_gen_cfilm=25801.html", _settings())
@@ -189,7 +189,7 @@ def test_search_movie_candidates_returns_ranked_unique_films(monkeypatch):
             ]
         }
     }
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
 
     result = asyncio.run(search_movie_candidates("shawshank", _settings()))
 
@@ -209,7 +209,7 @@ def test_search_movie_candidates_filters_non_title_imdb_ids(monkeypatch):
             ]
         }
     }
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
 
     result = asyncio.run(search_movie_candidates("shawshank", _settings()))
 
@@ -227,7 +227,7 @@ def test_search_movie_candidates_skips_rows_without_a_real_label(monkeypatch):
             ]
         }
     }
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
 
     result = asyncio.run(search_movie_candidates("godfather", _settings()))
 
@@ -245,7 +245,7 @@ def test_search_movie_candidates_respects_limit(monkeypatch):
             ]
         }
     }
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
 
     result = asyncio.run(search_movie_candidates("film", _settings(), limit=2))
 
@@ -254,20 +254,20 @@ def test_search_movie_candidates_respects_limit(monkeypatch):
 
 def test_search_movie_candidates_returns_empty_when_no_results(monkeypatch):
     _reset_fakes()
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
 
     assert asyncio.run(search_movie_candidates("nothing matches this", _settings())) == []
 
 
 def test_search_movie_candidates_returns_empty_on_upstream_error(monkeypatch):
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeErrorClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeErrorClient)
 
     assert asyncio.run(search_movie_candidates("shawshank", _settings())) == []
 
 
 def test_search_movie_candidates_skips_request_for_blank_query(monkeypatch):
     _reset_fakes()
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
 
     assert asyncio.run(search_movie_candidates("   ", _settings())) == []
     assert FakeAsyncClient.requests == []
@@ -275,7 +275,7 @@ def test_search_movie_candidates_skips_request_for_blank_query(monkeypatch):
 
 def test_search_movie_candidates_query_uses_entitysearch_and_escapes_quotes(monkeypatch):
     _reset_fakes()
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
 
     asyncio.run(search_movie_candidates('The "Best" Movie', _settings()))
 
@@ -299,7 +299,7 @@ def test_search_movie_candidates_retries_without_trailing_year(monkeypatch):
             }
         },
     ]
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeSequenceClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeSequenceClient)
 
     result = asyncio.run(search_movie_candidates("The Hitch-Hiker 1953", _settings()))
 
@@ -312,7 +312,7 @@ def test_search_movie_candidates_retries_without_trailing_year(monkeypatch):
 def test_search_movie_candidates_does_not_retry_without_a_trailing_year(monkeypatch):
     FakeSequenceClient.requests = []
     FakeSequenceClient.payloads = [{"results": {"bindings": []}}]
-    monkeypatch.setattr("app.services.wikidata.httpx.AsyncClient", FakeSequenceClient)
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeSequenceClient)
 
     result = asyncio.run(search_movie_candidates("totally unknown thing", _settings()))
 

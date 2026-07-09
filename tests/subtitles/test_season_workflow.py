@@ -2,10 +2,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from babelarr.cli import build_parser
-from babelarr.plex_resolver import PlexResolvedMedia
-from babelarr.season_workflow import translate_plex_season
-from babelarr.workflow import WorkflowOptions
+from mpilot.subtitles.cli import build_parser
+from mpilot.subtitles.plex_resolver import PlexResolvedMedia
+from mpilot.subtitles.season_workflow import translate_plex_season
+from mpilot.subtitles.workflow import WorkflowOptions
 
 
 def resolved_episode(root, episode):
