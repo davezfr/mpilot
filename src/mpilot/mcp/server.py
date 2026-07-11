@@ -38,7 +38,6 @@ async def media_request(
     notification_target: str | None = None,
     mode: str | None = None,
     save_path: str | None = None,
-    runtime_store_dir: str | None = None,
 ) -> dict[str, Any]:
     """Handle a media request and optionally attach subtitle intent.
 
@@ -76,7 +75,6 @@ async def media_request(
         notification_target=notification_target,
         mode=mode,
         save_path=save_path,
-        runtime_store_dir=runtime_store_dir,
     )
     info_hash = _payload_info_hash(payload)
     if payload.get("action") != "auto_download" or not info_hash:
@@ -108,7 +106,7 @@ async def media_request(
             target_language=_string_value(subtitle_target_language) or "",
             output_mode=_string_value(output_mode) or _default_output_mode(),
             notification_language=_string_value(subtitle_target_language),
-            runtime_store_dir=runtime_store_dir,
+            notification_target=_string_value(notification_target),
         )
         response["subtitle_intent"] = {
             "status": "registered",
@@ -125,6 +123,9 @@ async def media_request(
 
 
 def create_mcp_server():
+    from mpilot.core.dotenv import load_project_dotenv
+
+    load_project_dotenv()
     try:
         from mcp.server.fastmcp import FastMCP
     except ModuleNotFoundError as error:
@@ -153,19 +154,20 @@ def create_mcp_server():
             subtitle_tools.job_confirm_provider_fallback_language,
             subtitle_tools.job_prune,
         )
-    _register_tools(
-        mcp,
-        runtime_tools.record_acquisition_download,
-        runtime_tools.record_acquisition_download_with_subtitle_intent,
-        runtime_tools.attach_subtitle_intent,
-        runtime_tools.record_local_video_subtitle_intent,
-        runtime_tools.claim_ready_subtitle_job_create_video_actions,
-        runtime_tools.record_subtitle_job_created,
-        runtime_tools.record_subtitle_job_status,
-        runtime_tools.queue_status,
-        runtime_tools.workflow_show,
-        runtime_tools.list_workflows,
-    )
+    if runtime_operator_tools_enabled():
+        _register_tools(
+            mcp,
+            runtime_tools.record_acquisition_download,
+            runtime_tools.record_acquisition_download_with_subtitle_intent,
+            runtime_tools.attach_subtitle_intent,
+            runtime_tools.record_local_video_subtitle_intent,
+            runtime_tools.claim_ready_subtitle_job_create_video_actions,
+            runtime_tools.record_subtitle_job_created,
+            runtime_tools.record_subtitle_job_status,
+            runtime_tools.queue_status,
+            runtime_tools.workflow_show,
+            runtime_tools.list_workflows,
+        )
     return mcp
 
 
@@ -209,6 +211,16 @@ def subtitle_tools_enabled(environ: dict[str, str] | None = None) -> bool:
         "OPENSUBTITLES_API_KEY",
         "SUBDL_API_KEY",
     )
+
+
+def runtime_operator_tools_enabled(environ: dict[str, str] | None = None) -> bool:
+    env = os.environ if environ is None else environ
+    return _env_truthy(env, "MPILOT_ENABLE_RUNTIME_OPERATOR_TOOLS")
+
+
+def acquisition_control_tools_enabled(environ: dict[str, str] | None = None) -> bool:
+    env = os.environ if environ is None else environ
+    return _env_truthy(env, "MPILOT_ENABLE_ACQUISITION_CONTROL_TOOLS")
 
 
 def _register_tools(mcp: Any, *tools: Callable[..., Any]) -> None:
@@ -467,7 +479,6 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         """
         return await get_acquisition_client().render_download_status(info_hash, user_id=requester_id)
 
-    @mcp.tool()
     async def acquisition_pause_download(info_hash: str, requester_id: str) -> dict[str, Any]:
         """Pause a qBittorrent torrent owned by the requester.
 
@@ -478,7 +489,6 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         """
         return await get_acquisition_client().pause_download(info_hash, user_id=requester_id)
 
-    @mcp.tool()
     async def acquisition_resume_download(info_hash: str, requester_id: str) -> dict[str, Any]:
         """Resume a qBittorrent torrent owned by the requester.
 
@@ -487,7 +497,6 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         """
         return await get_acquisition_client().resume_download(info_hash, user_id=requester_id)
 
-    @mcp.tool()
     async def acquisition_delete_download(info_hash: str, requester_id: str) -> dict[str, Any]:
         """Delete a qBittorrent torrent task owned by the requester.
 
@@ -496,6 +505,14 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         requester_id is required and must match the torrent's requester tag.
         """
         return await get_acquisition_client().delete_download(info_hash, user_id=requester_id)
+
+    if acquisition_control_tools_enabled():
+        _register_tools(
+            mcp,
+            acquisition_pause_download,
+            acquisition_resume_download,
+            acquisition_delete_download,
+        )
 
     @mcp.tool()
     async def acquisition_watch_download(
@@ -555,7 +572,6 @@ def _subtitle_intent_payload(
     notification_target: str | None,
     mode: str | None,
     save_path: str | None,
-    runtime_store_dir: str | None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "requester_id": requester_id,
@@ -565,7 +581,6 @@ def _subtitle_intent_payload(
         "notification_target": notification_target,
         "mode": mode,
         "save_path": save_path,
-        "runtime_store_dir": runtime_store_dir,
     }
     return {key: value for key, value in payload.items() if value is not None}
 

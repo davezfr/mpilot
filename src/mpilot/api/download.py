@@ -4,8 +4,9 @@ import logging
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
+from mpilot.api.auth import bind_requester
 from mpilot.acquisition.config import get_settings
 from mpilot.acquisition.domain.download_progress import render_download_status_payload
 from mpilot.acquisition.domain.quality import extract_imdb_id, infer_media_type
@@ -28,8 +29,11 @@ router = APIRouter()
     summary="Queue a torrent or magnet in qBittorrent",
     tags=["acquisition"],
 )
-async def download(request: DownloadRequest) -> DownloadResponse:
+async def download(request: DownloadRequest, http_request: Request) -> DownloadResponse:
     try:
+        effective_user_id = bind_requester(http_request, request.user_id)
+        if effective_user_id != request.user_id:
+            request = request.model_copy(update={"user_id": effective_user_id})
         settings = get_settings()
         save_path, metadata = await _resolve_download_context(request, settings)
         download_kwargs = {"save_path": save_path}
@@ -85,6 +89,10 @@ def _snapshot_download_context(request: DownloadRequest, settings) -> tuple[str 
         snapshot = QuerySnapshotStore(_query_snapshot_dir(settings)).read(request.query_id)
     except FileNotFoundError as exc:
         raise ValueError("query_id was not found") from exc
+
+    snapshot_owner = snapshot.request.get("requester_id") if isinstance(snapshot.request, dict) else None
+    if request.user_id and snapshot_owner != request.user_id:
+        raise ValueError("query_id was not found")
 
     request_input = _optional_string(snapshot.request.get("input")) if isinstance(snapshot.request, dict) else None
     search_query = _optional_string(snapshot.request.get("query")) if isinstance(snapshot.request, dict) else None

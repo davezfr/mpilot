@@ -8,7 +8,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from mpilot.api.handle import _auto_download_message, _select_best_verified_result
-from mpilot.acquisition.config import get_settings
 from mpilot.acquisition.domain.quality import (
     calculate_score,
     contains_premium_quality_request,
@@ -23,6 +22,11 @@ from mpilot.acquisition.models import SearchResult, TorrentStatus
 from mpilot.acquisition.services.query_snapshots import QuerySnapshotStore
 
 CHINESE_TEXT_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+@pytest.fixture(autouse=True)
+def allow_unauthenticated_loopback_for_handle_tests(monkeypatch):
+    monkeypatch.setenv("MPILOT_ALLOW_UNAUTHENTICATED_LOOPBACK", "true")
 
 
 def _result(title: str, *, seeders: int = 10, link_suffix: str | None = None) -> SearchResult:

@@ -10,19 +10,21 @@ import re
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 import qbittorrentapi
 
 from mpilot.acquisition.config import Settings
 from mpilot.acquisition.domain.torrent_metadata import parse_torrent_info_hash
-from mpilot.acquisition.exceptions import UpstreamServiceError
+from mpilot.acquisition.exceptions import SharedDownloadControlError, UpstreamServiceError
 from mpilot.acquisition.models import TorrentStatus
 
 
 logger = logging.getLogger("qbitlarr-api.qbittorrent")
 _TORRENT_FILE_CACHE_MAX_ENTRIES = 200
+_TORRENT_FILE_MAX_BYTES = 10 * 1024 * 1024
+_TORRENT_FILE_MAX_REDIRECTS = 5
 _TORRENT_FILE_CACHE: OrderedDict[str, bytes] = OrderedDict()
 _MANAGED_TAG = "qbitlarr.managed"
 _REQUESTER_TAG_PREFIX = "requester."
@@ -100,9 +102,12 @@ async def add_download_to_qbittorrent(
 async def _build_torrent_add_payload(download_link: str, settings: Settings) -> TorrentAddPayload:
     if _should_upload_torrent_file(download_link):
         content = await _download_torrent_file(download_link, settings)
+        info_hash = parse_torrent_info_hash(content)
+        if not info_hash:
+            raise UpstreamServiceError("Torrent URL returned invalid torrent data")
         return TorrentAddPayload(
             kwargs={"torrent_files": content},
-            info_hash=parse_torrent_info_hash(content),
+            info_hash=info_hash,
         )
 
     return TorrentAddPayload(
@@ -117,28 +122,96 @@ def _should_upload_torrent_file(download_link: str) -> bool:
 
 async def _download_torrent_file(download_link: str, settings: Settings) -> bytes:
     fetch_url = _download_url_with_prowlarr_api_key(download_link, settings)
+    _validate_torrent_fetch_url(fetch_url, settings)
     if fetch_url in _TORRENT_FILE_CACHE:
         _TORRENT_FILE_CACHE.move_to_end(fetch_url)
         return _TORRENT_FILE_CACHE[fetch_url]
 
     try:
-        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=True) as client:
-            response = await client.get(fetch_url)
-            response.raise_for_status()
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=False) as client:
+            content = await _fetch_torrent_file(client, fetch_url, settings)
     except httpx.HTTPError as exc:
         logger.warning("Torrent file fetch failed: %s", exc.__class__.__name__)
         raise UpstreamServiceError("Torrent file is unreachable") from exc
 
-    content_type = response.headers.get("content-type", "").casefold()
-    if "html" in content_type:
-        logger.warning("Torrent file URL returned HTML content")
-        raise UpstreamServiceError("Torrent URL returned HTML instead of torrent data")
-    if not response.content:
-        logger.warning("Torrent file URL returned an empty response")
-        raise UpstreamServiceError("Torrent file response was empty")
+    _cache_torrent_file(fetch_url, content)
+    return content
 
-    _cache_torrent_file(fetch_url, response.content)
-    return response.content
+
+async def _fetch_torrent_file(client, fetch_url: str, settings: Settings) -> bytes:
+    current_url = fetch_url
+    for redirect_count in range(_TORRENT_FILE_MAX_REDIRECTS + 1):
+        _validate_torrent_fetch_url(current_url, settings)
+        async with client.stream("GET", current_url) as response:
+            response_url = getattr(response, "url", None)
+            if response_url is not None:
+                _validate_torrent_fetch_url(str(response_url), settings)
+
+            if response.status_code in {301, 302, 303, 307, 308}:
+                location = response.headers.get("location")
+                if not location or redirect_count >= _TORRENT_FILE_MAX_REDIRECTS:
+                    raise UpstreamServiceError("Torrent URL returned an invalid redirect")
+                next_url = urljoin(current_url, location)
+                _validate_torrent_fetch_url(next_url, settings)
+                current_url = next_url
+                continue
+
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "").casefold()
+            if "html" in content_type:
+                logger.warning("Torrent file URL returned HTML content")
+                raise UpstreamServiceError("Torrent URL returned HTML instead of torrent data")
+
+            chunks = []
+            total_bytes = 0
+            async for chunk in response.aiter_bytes():
+                if not chunk:
+                    continue
+                total_bytes += len(chunk)
+                if total_bytes > _TORRENT_FILE_MAX_BYTES:
+                    logger.warning("Torrent file response exceeded size limit")
+                    raise UpstreamServiceError("Torrent file response is too large")
+                chunks.append(chunk)
+
+            content = b"".join(chunks)
+            if not content:
+                logger.warning("Torrent file URL returned an empty response")
+                raise UpstreamServiceError("Torrent file response was empty")
+            return content
+
+    raise UpstreamServiceError("Torrent URL returned too many redirects")
+
+
+def _validate_torrent_fetch_url(fetch_url: str, settings: Settings) -> None:
+    parsed = urlparse(fetch_url)
+    origin = _torrent_url_origin(parsed)
+    if origin is None or origin not in _allowed_torrent_download_origins(settings):
+        raise UpstreamServiceError("Torrent URL is not allowed")
+
+
+def _allowed_torrent_download_origins(settings: Settings) -> set[tuple[str, str, int]]:
+    origins = set()
+    for configured_url in (
+        getattr(settings, "prowlarr_url", None),
+        getattr(settings, "prowlarr_download_url", None),
+    ):
+        if not isinstance(configured_url, str) or not configured_url.strip():
+            continue
+        origin = _torrent_url_origin(urlparse(configured_url))
+        if origin is not None:
+            origins.add(origin)
+    return origins
+
+
+def _torrent_url_origin(parsed) -> tuple[str, str, int] | None:
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    return scheme, parsed.hostname.casefold(), port or (443 if scheme == "https" else 80)
 
 
 def _cache_torrent_file(fetch_url: str, content: bytes) -> None:
@@ -204,6 +277,14 @@ def _get_torrent_status(qbit_client, info_hash: str | None, *, tag: str | None =
     for torrent in _list_torrents(qbit_client, torrent_hashes=target, tag=tag):
         if str(torrent.hash).casefold() == target:
             return _torrent_status_from_client_torrent(torrent)
+    return None
+
+
+def _get_torrent(qbit_client, info_hash: str, *, tag: str | None = None):
+    target = _normalize_btih_hash(info_hash)
+    for torrent in _list_torrents(qbit_client, torrent_hashes=target, tag=tag):
+        if str(torrent.hash).casefold() == target:
+            return torrent
     return None
 
 
@@ -329,16 +410,11 @@ def _requester_tag_for_user(requester_id: str | None) -> str | None:
         return None
 
     sanitized = re.sub(r"[^a-z0-9._-]+", "-", normalized).strip("-._")
-    if not sanitized:
-        sanitized = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
-
-    tag = f"{_REQUESTER_TAG_PREFIX}{sanitized}"
-    if len(tag) <= _REQUESTER_TAG_MAX_LENGTH:
-        return tag
-
-    digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
     suffix_budget = _REQUESTER_TAG_MAX_LENGTH - len(_REQUESTER_TAG_PREFIX) - len(digest) - 1
     trimmed = sanitized[: max(suffix_budget, 1)].rstrip("-._")
+    if not trimmed:
+        trimmed = "id"
     return f"{_REQUESTER_TAG_PREFIX}{trimmed}-{digest}"
 
 
@@ -456,9 +532,17 @@ async def _control_download_in_qbittorrent(
             password=settings.qbit_password,
         ) as qbit_client:
             qbit_client.auth_log_in()
-            status = _get_torrent_status(qbit_client, info_hash, tag=requester_tag)
-            if status is None:
+            torrent = _get_torrent(qbit_client, info_hash, tag=requester_tag)
+            if torrent is None:
                 return None
+            status = _torrent_status_from_client_torrent(torrent)
+            requester_tags = {
+                tag for tag in _torrent_tags(getattr(torrent, "tags", "")) if tag.startswith(_REQUESTER_TAG_PREFIX)
+            }
+            if len(requester_tags) > 1:
+                raise SharedDownloadControlError(
+                    "Download is shared by multiple requesters and cannot be controlled by one requester"
+                )
             if action == "pause":
                 qbit_client.torrents_pause(torrent_hashes=info_hash)
             elif action == "resume":

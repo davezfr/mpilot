@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
+from mpilot.api.auth import bind_requester
 from mpilot.acquisition.config import get_settings
 from mpilot.acquisition.domain.download_progress import (
     dynamic_progress_watch_policy,
     render_download_status_payload,
-    render_download_status,
     render_downloads_status,
 )
-from mpilot.acquisition.exceptions import ConfigurationError, UpstreamServiceError
+from mpilot.acquisition.exceptions import ConfigurationError, SharedDownloadControlError, UpstreamServiceError
 from mpilot.acquisition.models import (
     DownloadControlResponse,
     DynamicProgressWatchPolicy,
@@ -41,6 +41,7 @@ router = APIRouter()
     tags=["acquisition"],
 )
 async def list_downloads(
+    request: Request,
     user_id: str | None = Query(
         default=None,
         description="Optional requester identifier. When set, only torrents tagged for that requester are returned.",
@@ -48,7 +49,8 @@ async def list_downloads(
 ) -> list[TorrentStatus]:
     try:
         settings = get_settings()
-        return await list_downloads_from_qbittorrent(settings, requester_id=normalize_optional_user_id(user_id))
+        requester_id = bind_requester(request, normalize_optional_user_id(user_id))
+        return await list_downloads_from_qbittorrent(settings, requester_id=requester_id)
     except ConfigurationError as exc:
         logger.error("Configuration error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -64,6 +66,7 @@ async def list_downloads(
     tags=["acquisition"],
 )
 async def render_downloads_status_message(
+    request: Request,
     user_id: str | None = Query(
         default=None,
         description="Optional requester identifier. When set, only torrents tagged for that requester are returned.",
@@ -71,10 +74,8 @@ async def render_downloads_status_message(
 ) -> RenderedDownloadsStatusResponse:
     try:
         settings = get_settings()
-        downloads = await list_downloads_from_qbittorrent(
-            settings,
-            requester_id=normalize_optional_user_id(user_id),
-        )
+        requester_id = bind_requester(request, normalize_optional_user_id(user_id))
+        downloads = await list_downloads_from_qbittorrent(settings, requester_id=requester_id)
         return RenderedDownloadsStatusResponse(
             message=render_downloads_status(downloads),
             watch_policy=_watch_policy(),
@@ -96,6 +97,7 @@ async def render_downloads_status_message(
 )
 async def render_download_status_message(
     info_hash: str,
+    request: Request,
     user_id: str | None = Query(
         default=None,
         description="Optional requester identifier. When set, the torrent must be tagged for that requester.",
@@ -103,11 +105,8 @@ async def render_download_status_message(
 ) -> RenderedDownloadStatusResponse:
     try:
         settings = get_settings()
-        status = await get_download_status_from_qbittorrent(
-            settings,
-            info_hash,
-            requester_id=normalize_optional_user_id(user_id),
-        )
+        requester_id = bind_requester(request, normalize_optional_user_id(user_id))
+        status = await get_download_status_from_qbittorrent(settings, info_hash, requester_id=requester_id)
         if status is None:
             raise HTTPException(status_code=404, detail="Download not found")
         rendered = render_download_status_payload(status)
@@ -133,6 +132,7 @@ async def render_download_status_message(
 )
 async def get_download_status(
     info_hash: str,
+    request: Request,
     user_id: str | None = Query(
         default=None,
         description="Optional requester identifier. When set, the torrent must be tagged for that requester.",
@@ -140,11 +140,8 @@ async def get_download_status(
 ) -> TorrentStatus:
     try:
         settings = get_settings()
-        status = await get_download_status_from_qbittorrent(
-            settings,
-            info_hash,
-            requester_id=normalize_optional_user_id(user_id),
-        )
+        requester_id = bind_requester(request, normalize_optional_user_id(user_id))
+        status = await get_download_status_from_qbittorrent(settings, info_hash, requester_id=requester_id)
         if status is None:
             raise HTTPException(status_code=404, detail="Download not found")
         return status
@@ -164,12 +161,13 @@ async def get_download_status(
 )
 async def pause_download(
     info_hash: str,
+    request: Request,
     user_id: str = Query(
         ...,
         description="Required requester identifier. The torrent must be tagged for this requester.",
     ),
 ) -> DownloadControlResponse:
-    return await _control_download(info_hash, user_id=user_id, action="pause")
+    return await _control_download(info_hash, request=request, user_id=user_id, action="pause")
 
 
 @router.post(
@@ -181,12 +179,13 @@ async def pause_download(
 )
 async def resume_download(
     info_hash: str,
+    request: Request,
     user_id: str = Query(
         ...,
         description="Required requester identifier. The torrent must be tagged for this requester.",
     ),
 ) -> DownloadControlResponse:
-    return await _control_download(info_hash, user_id=user_id, action="resume")
+    return await _control_download(info_hash, request=request, user_id=user_id, action="resume")
 
 
 @router.post(
@@ -198,20 +197,28 @@ async def resume_download(
 )
 async def delete_download(
     info_hash: str,
+    request: Request,
     user_id: str = Query(
         ...,
         description="Required requester identifier. The torrent must be tagged for this requester.",
     ),
 ) -> DownloadControlResponse:
-    return await _control_download(info_hash, user_id=user_id, action="delete")
+    return await _control_download(info_hash, request=request, user_id=user_id, action="delete")
 
 
-async def _control_download(info_hash: str, *, user_id: str, action: str) -> DownloadControlResponse:
+async def _control_download(
+    info_hash: str,
+    *,
+    request: Request,
+    user_id: str,
+    action: str,
+) -> DownloadControlResponse:
     requester_id = normalize_optional_user_id(user_id)
     if not requester_id:
         raise HTTPException(status_code=422, detail="user_id is required")
 
     try:
+        requester_id = bind_requester(request, requester_id)
         settings = get_settings()
         if action == "pause":
             status = await pause_download_in_qbittorrent(settings, info_hash, requester_id=requester_id)
@@ -227,6 +234,8 @@ async def _control_download(info_hash: str, *, user_id: str, action: str) -> Dow
     except ConfigurationError as exc:
         logger.error("Configuration error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except SharedDownloadControlError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except UpstreamServiceError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

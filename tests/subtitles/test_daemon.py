@@ -4,8 +4,10 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mpilot.daemon import acquire_daemon_lock, release_daemon_lock, run_daemon, run_daemon_once
+from mpilot.daemon.cli import main as daemon_main
 from mpilot.mcp.acquisition_notifications import DownloadCompletionNotifier, DownloadWatchStore
 from mpilot.runtime import MediaWorkflowRuntime
 from mpilot.runtime.dispatcher import dispatch_qbitlarr_completion
@@ -28,6 +30,10 @@ class FailingAcquisitionNotifier:
 
 
 class DaemonTests(unittest.TestCase):
+    def test_daemon_cli_returns_failure_for_partial_failure(self):
+        with patch("mpilot.daemon.cli.run_daemon", return_value={"status": "partial_failure", "errors": []}):
+            self.assertEqual(daemon_main(["--once"]), 1)
+
     def test_daemon_once_dispatches_qbitlarr_completion_to_babelarr_job(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

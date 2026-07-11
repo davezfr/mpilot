@@ -182,6 +182,46 @@ class RuntimeDispatcherTests(unittest.TestCase):
             self.assertEqual(started_calls[0][1]["notification_language"], "en")
             self.assertEqual(runtime.workflow_summary(later["workflow_id"])["tasks"][1]["status"], "ready")
 
+    def test_dispatch_ready_actions_honors_explicit_notification_target_without_overriding_requester(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = MediaWorkflowRuntime(Path(tmp))
+            runtime.record_local_video_subtitle_intent(
+                requester_id="user-123",
+                video_path="/mnt/media/Movies/Movie.mkv",
+                title="Movie",
+                source_language="en",
+                target_language="zh",
+                output_mode="bilingual-ass",
+                notification_target="telegram:456",
+            )
+            started_calls = []
+
+            def fake_job_create_video(video_path, **kwargs):
+                return {
+                    "job_store": "/tmp/babelarr-jobs",
+                    "job": {"job_id": "job_123", "status": "queued"},
+                }
+
+            def fake_job_start(job_id, **kwargs):
+                started_calls.append((job_id, kwargs))
+                return {
+                    "status": "started",
+                    "job_store": "/tmp/babelarr-jobs",
+                    "job": {"job_id": job_id, "status": "running"},
+                }
+
+            dispatch_ready_mst_actions(
+                runtime,
+                job_store_dir="/tmp/babelarr-jobs",
+                notification_target="telegram:event-source",
+                requester_id="user-123",
+                mst_job_create_video=fake_job_create_video,
+                mst_job_start=fake_job_start,
+            )
+
+            self.assertEqual(started_calls[0][1]["notification_target"], "telegram:456")
+            self.assertEqual(started_calls[0][1]["requester_id"], "user-123")
+
     def test_dispatch_ready_actions_attempts_one_queued_action_per_call(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime = MediaWorkflowRuntime(Path(tmp))

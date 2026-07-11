@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
+import re
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -12,6 +13,7 @@ from typing import Any, Dict, List, Mapping, Optional, Union
 
 
 WORKFLOW_SCHEMA_VERSION = 1
+WORKFLOW_ID_RE = re.compile(r"^workflow_[A-Za-z0-9_-]+$")
 ACTIVE_SUBTITLE_STATUSES = {"dispatching", "queued", "running"}
 OPEN_SUBTITLE_STATUSES = {
     "waiting_for_dependency",
@@ -33,6 +35,26 @@ class QBitlarrHashNotTrackedError(RuntimeStoreError):
     def __init__(self, info_hash: str):
         super().__init__("download task not found for qBitlarr hash: %s" % info_hash)
         self.info_hash = info_hash
+
+
+def _read_workflow_file(path: Path, *, expected_workflow_id: str) -> Dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        _quarantine_corrupt_json(path)
+        raise RuntimeStoreError("corrupt workflow state quarantined: %s" % expected_workflow_id) from error
+    if not isinstance(payload, dict) or payload.get("workflow_id") != expected_workflow_id:
+        _quarantine_corrupt_json(path)
+        raise RuntimeStoreError("corrupt workflow state quarantined: %s" % expected_workflow_id)
+    return payload
+
+
+def _quarantine_corrupt_json(path: Path) -> None:
+    target = path.with_suffix(path.suffix + ".corrupt")
+    if target.exists():
+        target = path.with_suffix(path.suffix + ".corrupt-" + uuid.uuid4().hex)
+    with contextlib.suppress(OSError):
+        path.replace(target)
 
 
 def _locked_method(method):
@@ -66,7 +88,7 @@ class MediaWorkflowRuntime:
         content_path: Optional[str] = None,
         now: Optional[Union[str, datetime]] = None,
     ) -> Dict[str, Any]:
-        current = self._find_by_qbitlarr_hash(info_hash)
+        current = self._find_by_qbitlarr_hash_for_requester(info_hash, requester_id)
         timestamp = _timestamp(now)
         completed_content_path = _completed_content_path(progress, content_path)
         if current is not None:
@@ -154,6 +176,7 @@ class MediaWorkflowRuntime:
         target_language: str,
         output_mode: str,
         notification_language: Optional[str] = None,
+        notification_target: Optional[str] = None,
         now: Optional[Union[str, datetime]] = None,
     ) -> Dict[str, Any]:
         candidates = self._attachable_downloads(requester_id)
@@ -163,6 +186,7 @@ class MediaWorkflowRuntime:
             raise RuntimeStoreError("multiple active downloads for requester: %s" % requester_id)
 
         workflow = candidates[0]
+        _update_notification_target(workflow, notification_target)
         return self._attach_subtitle_intent_to_workflow(
             workflow,
             source_language=source_language,
@@ -221,6 +245,7 @@ class MediaWorkflowRuntime:
         progress: float = 0.0,
         content_path: Optional[str] = None,
         notification_language: Optional[str] = None,
+        notification_target: Optional[str] = None,
         now: Optional[Union[str, datetime]] = None,
     ) -> Dict[str, Any]:
         workflow = self.record_qbitlarr_download(
@@ -235,10 +260,11 @@ class MediaWorkflowRuntime:
             content_path=content_path,
             now=now,
         )
+        _update_notification_target(workflow, notification_target)
         if _has_subtitle_task(workflow):
             return self._save(_update_subtitle_notification_language(workflow, notification_language))
         return self._attach_subtitle_intent_to_workflow(
-            self._workflow_by_id(str(workflow.get("workflow_id") or "")),
+            workflow,
             source_language=source_language,
             target_language=target_language,
             output_mode=output_mode,
@@ -261,6 +287,7 @@ class MediaWorkflowRuntime:
         season: Optional[int] = None,
         episode: Optional[int] = None,
         notification_language: Optional[str] = None,
+        notification_target: Optional[str] = None,
         now: Optional[Union[str, datetime]] = None,
     ) -> Dict[str, Any]:
         timestamp = _timestamp(now)
@@ -296,6 +323,7 @@ class MediaWorkflowRuntime:
         }
         _set_if_value(workflow["media"], "season", season)
         _set_if_value(workflow["media"], "episode", episode)
+        _update_notification_target(workflow, notification_target)
         return self._save(workflow)
 
     @_locked_method
@@ -306,11 +334,31 @@ class MediaWorkflowRuntime:
         content_path: str,
         now: Optional[Union[str, datetime]] = None,
     ) -> List[Dict[str, Any]]:
-        workflow = self._find_by_qbitlarr_hash(info_hash)
-        if workflow is None:
+        workflows = self._find_all_by_qbitlarr_hash(info_hash)
+        if not workflows:
             raise QBitlarrHashNotTrackedError(info_hash)
 
         timestamp = _timestamp(now)
+        actions: List[Dict[str, Any]] = []
+        for workflow in workflows:
+            actions.extend(
+                self._mark_workflow_qbitlarr_download_complete(
+                    workflow,
+                    info_hash,
+                    content_path,
+                    timestamp,
+                )
+            )
+            self._save(workflow)
+        return actions
+
+    def _mark_workflow_qbitlarr_download_complete(
+        self,
+        workflow: Dict[str, Any],
+        info_hash: str,
+        content_path: str,
+        timestamp: str,
+    ) -> List[Dict[str, Any]]:
         workflow["updated_at"] = timestamp
         workflow.setdefault("artifacts", {})["video_path"] = _required(content_path, "content_path")
         download_task = _download_task(workflow)
@@ -331,7 +379,6 @@ class MediaWorkflowRuntime:
             _replace_non_waiting_subtitle_tasks(workflow, timestamp)
         actions = _release_waiting_subtitle_tasks(workflow, timestamp)
 
-        self._save(workflow)
         return actions
 
     @_locked_method
@@ -344,8 +391,8 @@ class MediaWorkflowRuntime:
         now: Optional[Union[str, datetime]] = None,
     ) -> Dict[str, Any]:
         normalized_hash = _required(info_hash, "info_hash")
-        workflow = self._find_by_qbitlarr_hash(normalized_hash)
-        if workflow is None:
+        workflows = self._find_all_by_qbitlarr_hash(normalized_hash)
+        if not workflows:
             return {
                 "status": "not_found",
                 "info_hash": normalized_hash,
@@ -354,22 +401,37 @@ class MediaWorkflowRuntime:
                 "updated_at": _timestamp(now),
             }
 
-        workflow_id = _required(str(workflow.get("workflow_id") or ""), "workflow_id")
-        tasks_cleared = [
-            str(task.get("task_type") or "unknown")
-            for task in workflow.get("tasks", [])
-        ]
-        path = self.root / ("%s.json" % workflow_id)
-        if path.exists():
-            path.unlink()
+        cleared = []
+        for workflow in workflows:
+            workflow_id = _required(str(workflow.get("workflow_id") or ""), "workflow_id")
+            tasks_cleared = [
+                str(task.get("task_type") or "unknown")
+                for task in workflow.get("tasks", [])
+            ]
+            path = self._workflow_path(workflow_id)
+            if path.exists():
+                path.unlink()
+            cleared.append(
+                {
+                    "workflow_id": workflow_id,
+                    "requester_id": workflow.get("requester_id"),
+                    "tasks_cleared": tasks_cleared,
+                    "previous_status": workflow.get("status"),
+                }
+            )
+
+        first = cleared[0]
 
         return {
             "status": "cleared",
-            "workflow_id": workflow_id,
+            "workflow_id": first["workflow_id"],
+            "workflow_ids": [item["workflow_id"] for item in cleared],
+            "workflows_cleared": len(cleared),
+            "cleared_workflows": cleared,
             "info_hash": normalized_hash,
             "reason": reason,
-            "tasks_cleared": tasks_cleared,
-            "previous_status": workflow.get("status"),
+            "tasks_cleared": first["tasks_cleared"],
+            "previous_status": first["previous_status"],
             "error": dict(error) if error is not None else None,
             "updated_at": _timestamp(now),
         }
@@ -634,7 +696,10 @@ class MediaWorkflowRuntime:
             return []
         workflows = []
         for path in self.root.glob("*.json"):
-            workflows.append(json.loads(path.read_text(encoding="utf-8")))
+            try:
+                workflows.append(_read_workflow_file(path, expected_workflow_id=path.stem))
+            except RuntimeStoreError:
+                continue
         workflows.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
         return workflows
 
@@ -654,33 +719,49 @@ class MediaWorkflowRuntime:
         return matches
 
     def _find_by_qbitlarr_hash(self, info_hash: str) -> Optional[Dict[str, Any]]:
-        target = _required(info_hash, "info_hash").casefold()
-        for workflow in self.list_workflows():
-            try:
-                task = _download_task(workflow)
-            except RuntimeStoreError:
-                continue
-            qbitlarr = task.get("qbitlarr") or {}
-            if str(qbitlarr.get("info_hash") or "").casefold() == target:
+        for workflow in self._find_all_by_qbitlarr_hash(info_hash):
+            return workflow
+        return None
+
+    def _find_by_qbitlarr_hash_for_requester(self, info_hash: str, requester_id: str) -> Optional[Dict[str, Any]]:
+        target_requester = _required(requester_id, "requester_id")
+        for workflow in self._find_all_by_qbitlarr_hash(info_hash):
+            if workflow.get("requester_id") == target_requester:
                 return workflow
         return None
 
+    def _find_all_by_qbitlarr_hash(self, info_hash: str) -> List[Dict[str, Any]]:
+        target = _required(info_hash, "info_hash").casefold()
+        matches = []
+        for workflow in self.list_workflows():
+            if _workflow_has_qbitlarr_hash(workflow, target):
+                matches.append(workflow)
+        return matches
+
     def _workflow_by_id(self, workflow_id: str) -> Dict[str, Any]:
-        target = _required(workflow_id, "workflow_id")
-        path = self.root / ("%s.json" % target)
+        target = _validate_workflow_id(workflow_id)
+        path = self._workflow_path(target)
         if not path.exists():
             raise RuntimeStoreError("workflow not found: %s" % target)
-        return json.loads(path.read_text(encoding="utf-8"))
+        return _read_workflow_file(path, expected_workflow_id=target)
 
     def _save(self, workflow: Mapping[str, Any]) -> Dict[str, Any]:
-        workflow_id = _required(str(workflow.get("workflow_id") or ""), "workflow_id")
+        workflow_id = _validate_workflow_id(str(workflow.get("workflow_id") or ""))
         self.root.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(workflow, ensure_ascii=False, indent=2, sort_keys=True)
-        path = self.root / ("%s.json" % workflow_id)
+        path = self._workflow_path(workflow_id)
         tmp_path = path.with_suffix(".json.tmp")
         tmp_path.write_text(payload + "\n", encoding="utf-8")
         tmp_path.replace(path)
         return dict(workflow)
+
+    def _workflow_path(self, workflow_id: str) -> Path:
+        target = _validate_workflow_id(workflow_id)
+        root = self.root.resolve(strict=False)
+        path = (root / ("%s.json" % target)).resolve(strict=False)
+        if path.parent != root:
+            raise RuntimeStoreError("invalid workflow_id: %s" % target)
+        return path
 
     @contextlib.contextmanager
     def _store_lock(self):
@@ -744,6 +825,12 @@ def _update_subtitle_notification_language(
     return workflow
 
 
+def _update_notification_target(workflow: Dict[str, Any], notification_target: Optional[str]) -> None:
+    target = _string_value(notification_target)
+    if target:
+        workflow["notification_target"] = target
+
+
 def _remove_subtitle_tasks(workflow: Dict[str, Any]) -> None:
     workflow["tasks"] = [task for task in workflow.get("tasks", []) if task.get("task_type") != "translate_subtitle"]
 
@@ -779,6 +866,15 @@ def _subtitle_resource_ready(workflow: Mapping[str, Any], subtitle_task: Mapping
     except RuntimeStoreError:
         return _video_path(workflow) is not None
     return _download_dependency_satisfied(workflow)
+
+
+def _workflow_has_qbitlarr_hash(workflow: Mapping[str, Any], target_hash: str) -> bool:
+    try:
+        task = _download_task(workflow)
+    except RuntimeStoreError:
+        return False
+    qbitlarr = task.get("qbitlarr") or {}
+    return str(qbitlarr.get("info_hash") or "").casefold() == target_hash
 
 
 def _subtitle_queue_items(
@@ -939,6 +1035,7 @@ def _mst_job_create_video_action(workflow: Mapping[str, Any], subtitle_task: Map
         "requester_id": workflow.get("requester_id"),
         "arguments": arguments,
     }
+    _set_if_value(action, "notification_target", _string_value(workflow.get("notification_target")))
     _set_if_value(action, "notification_language", _string_value(subtitle.get("notification_language")))
     return action
 
@@ -1011,6 +1108,13 @@ def _required(value: Optional[str], name: str) -> str:
     if value is None or not str(value).strip():
         raise RuntimeStoreError("%s must not be empty" % name)
     return str(value).strip()
+
+
+def _validate_workflow_id(value: Optional[str]) -> str:
+    workflow_id = _required(value, "workflow_id")
+    if not WORKFLOW_ID_RE.fullmatch(workflow_id):
+        raise RuntimeStoreError("invalid workflow_id: %s" % workflow_id)
+    return workflow_id
 
 
 def _timestamp(value: Optional[Union[str, datetime]] = None) -> str:

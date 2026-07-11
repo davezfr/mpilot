@@ -22,6 +22,19 @@ jobs:
           python -m pip install -e ".[all,dev]"
       - name: Run tests
         run: python -m pytest -q
+      - name: Run Ruff
+        run: python -m ruff check src tests
+      - name: Audit Python dependencies
+        run: |
+          python -m pip install pip-audit==2.10.1
+          python -m pip_audit -r requirements.txt
+      - name: Verify dependency-free base CLI
+        run: |
+          python -m pip wheel --no-deps . --wheel-dir /tmp/mpilot-dist
+          python -m venv /tmp/mpilot-base
+          /tmp/mpilot-base/bin/python -m pip install --no-deps /tmp/mpilot-dist/mpilot-*.whl
+          /tmp/mpilot-base/bin/mpilot --help
+          /tmp/mpilot-base/bin/mpilot subtitles --help
       - name: Check shared infrastructure dedupe
         run: |
           set -euo pipefail
@@ -32,7 +45,7 @@ jobs:
             "def _read_env_file_value" \
             "def _parse_telegram_target"
           do
-            matches=$(grep -RIn --include='*.py' "$pattern" . | grep -v './src/mpilot/core/' | grep -v './tests/' || true)
+            matches=$(grep -RIn --include='*.py' --exclude-dir=.git --exclude-dir=build --exclude-dir=dist "$pattern" . | grep -v './src/mpilot/core/' | grep -v './tests/' || true)
             if [ -n "$matches" ]; then
               echo "$matches"
               exit 1

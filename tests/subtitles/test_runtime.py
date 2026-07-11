@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
-import subprocess
-import sys
 from pathlib import Path
 
 from mpilot.runtime import (
@@ -14,6 +15,36 @@ from mpilot.runtime import (
 
 
 class MediaWorkflowRuntimeTests(unittest.TestCase):
+    def test_list_workflows_quarantines_corrupt_state_and_keeps_valid_workflows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = MediaWorkflowRuntime(root)
+            valid = runtime.record_qbitlarr_download(
+                requester_id="telegram:123",
+                info_hash="abc123",
+                title="Example Movie",
+            )
+            corrupt_path = root / "workflow_corrupt.json"
+            corrupt_path.write_text("{broken", encoding="utf-8")
+
+            workflows = runtime.list_workflows()
+
+            self.assertEqual([workflow["workflow_id"] for workflow in workflows], [valid["workflow_id"]])
+            self.assertFalse(corrupt_path.exists())
+            self.assertTrue((root / "workflow_corrupt.json.corrupt").exists())
+
+    def test_workflow_summary_quarantines_mismatched_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = MediaWorkflowRuntime(root)
+            corrupt_path = root / "workflow_corrupt.json"
+            corrupt_path.write_text('{"workflow_id":"workflow_other"}', encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeStoreError, "corrupt workflow state quarantined"):
+                runtime.workflow_summary("workflow_corrupt")
+
+            self.assertTrue((root / "workflow_corrupt.json.corrupt").exists())
+
     def test_subtitle_request_attaches_to_single_active_download_and_waits(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime = MediaWorkflowRuntime(Path(tmp))
@@ -82,6 +113,75 @@ class MediaWorkflowRuntimeTests(unittest.TestCase):
             actions = runtime.claim_ready_mst_job_create_video_actions()
             self.assertEqual(actions[0]["notification_language"], "en")
             self.assertNotIn("notification_language", actions[0]["arguments"])
+
+    def test_same_hash_different_requesters_keep_independent_subtitle_intents(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = MediaWorkflowRuntime(Path(tmp))
+
+            first = runtime.record_qbitlarr_download_with_subtitle_intent(
+                requester_id="telegram:first",
+                notification_target="telegram:chat-first",
+                info_hash="abc123",
+                title="Shared Movie",
+                progress=0.25,
+                source_language="en",
+                target_language="zh",
+                output_mode="bilingual-ass",
+            )
+            second = runtime.record_qbitlarr_download_with_subtitle_intent(
+                requester_id="telegram:second",
+                notification_target="telegram:chat-second",
+                info_hash="abc123",
+                title="Shared Movie",
+                progress=0.25,
+                source_language="fr",
+                target_language="en",
+                output_mode="single-srt",
+            )
+
+            self.assertNotEqual(first["workflow_id"], second["workflow_id"])
+            workflows = {item["requester_id"]: item for item in runtime.list_workflows()}
+            self.assertEqual(set(workflows), {"telegram:first", "telegram:second"})
+            self.assertEqual(workflows["telegram:first"]["tasks"][1]["subtitle"]["target_language"], "zh")
+            self.assertEqual(workflows["telegram:second"]["tasks"][1]["subtitle"]["source_language"], "fr")
+
+            actions = runtime.mark_qbitlarr_download_complete(
+                info_hash="abc123",
+                content_path="/mnt/media/Movies/Shared.Movie.mkv",
+            )
+
+            self.assertEqual({action["requester_id"] for action in actions}, {"telegram:first", "telegram:second"})
+            self.assertEqual(
+                {action["notification_target"] for action in actions},
+                {"telegram:chat-first", "telegram:chat-second"},
+            )
+            first_after = runtime.workflow_summary(first["workflow_id"])
+            second_after = runtime.workflow_summary(second["workflow_id"])
+            self.assertEqual(first_after["tasks"][1]["status"], "ready")
+            self.assertEqual(second_after["tasks"][1]["status"], "ready")
+            self.assertEqual(second_after["tasks"][1]["subtitle"]["output_mode"], "single-srt")
+
+    def test_workflow_summary_rejects_path_traversal_workflow_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "runtime"
+            root.mkdir()
+            (Path(tmp) / "outside.json").write_text(
+                json.dumps({"workflow_id": "outside", "requester_id": "sensitive-requester", "tasks": []}),
+                encoding="utf-8",
+            )
+            runtime = MediaWorkflowRuntime(root)
+
+            with self.assertRaisesRegex(RuntimeStoreError, "invalid workflow_id"):
+                runtime.workflow_summary("../outside")
+
+    def test_workflow_summary_rejects_absolute_and_dotted_workflow_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = MediaWorkflowRuntime(Path(tmp))
+
+            for workflow_id in ("/tmp/outside", "workflow_123/child", "workflow_123\\child", ".", "..", "workflow_.."):
+                with self.subTest(workflow_id=workflow_id):
+                    with self.assertRaisesRegex(RuntimeStoreError, "invalid workflow_id"):
+                        runtime.workflow_summary(workflow_id)
 
     def test_incomplete_download_path_does_not_release_subtitle_task(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -277,6 +377,31 @@ class MediaWorkflowRuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.list_workflows(), [])
             with self.assertRaisesRegex(RuntimeStoreError, "download task not found"):
                 runtime.workflow_for_qbitlarr_hash("abc123")
+
+    def test_removed_shared_download_clears_all_requester_workflows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = MediaWorkflowRuntime(Path(tmp))
+            first = runtime.record_qbitlarr_download_with_subtitle_intent(
+                requester_id="telegram:first",
+                info_hash="abc123",
+                source_language="en",
+                target_language="zh",
+                output_mode="bilingual-ass",
+            )
+            second = runtime.record_qbitlarr_download_with_subtitle_intent(
+                requester_id="telegram:second",
+                info_hash="ABC123",
+                source_language="fr",
+                target_language="en",
+                output_mode="single-srt",
+            )
+
+            summary = runtime.clear_qbitlarr_download_workflow(info_hash="abc123")
+
+            self.assertEqual(summary["status"], "cleared")
+            self.assertEqual(summary["workflows_cleared"], 2)
+            self.assertEqual(set(summary["workflow_ids"]), {first["workflow_id"], second["workflow_id"]})
+            self.assertEqual(runtime.list_workflows(), [])
 
     def test_combined_download_with_subtitle_intent_attaches_to_recorded_hash_when_other_downloads_exist(self):
         with tempfile.TemporaryDirectory() as tmp:

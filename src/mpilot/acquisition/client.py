@@ -22,11 +22,13 @@ class AcquisitionApiClient:
         api_url: str,
         *,
         api_key: str | None = None,
+        requester_id: str | None = None,
         timeout: float = 30.0,
         transport: httpx.AsyncBaseTransport | httpx.BaseTransport | None = None,
     ) -> None:
         self.api_url = api_url.rstrip("/")
         self.api_key = api_key.strip() if api_key and api_key.strip() else None
+        self.requester_id = requester_id.strip() if requester_id and requester_id.strip() else None
         self.timeout = timeout
         self.transport = transport
 
@@ -59,6 +61,7 @@ class AcquisitionApiClient:
         query_id: str | None = None,
         user_id: str | None = None,
     ) -> dict[str, Any]:
+        user_id = self._bound_requester_id(user_id)
         response = await self._request(
             "POST",
             "/download",
@@ -80,6 +83,7 @@ class AcquisitionApiClient:
         save_path: str | None = None,
         mode: str | None = None,
     ) -> dict[str, Any]:
+        user_id = self._bound_requester_id(user_id)
         response = await self._request(
             "POST",
             "/handle",
@@ -104,6 +108,7 @@ class AcquisitionApiClient:
         return response
 
     async def list_downloads(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        user_id = self._bound_requester_id(user_id)
         kwargs: dict[str, Any] = {}
         if user_id:
             kwargs["params"] = {"user_id": user_id}
@@ -113,6 +118,7 @@ class AcquisitionApiClient:
         return response
 
     async def get_download_status(self, info_hash: str, user_id: str | None = None) -> dict[str, Any]:
+        user_id = self._bound_requester_id(user_id)
         kwargs: dict[str, Any] = {}
         if user_id:
             kwargs["params"] = {"user_id": user_id}
@@ -122,6 +128,7 @@ class AcquisitionApiClient:
         return response
 
     async def render_downloads_status(self, user_id: str | None = None) -> dict[str, Any]:
+        user_id = self._bound_requester_id(user_id)
         kwargs: dict[str, Any] = {}
         if user_id:
             kwargs["params"] = {"user_id": user_id}
@@ -131,6 +138,7 @@ class AcquisitionApiClient:
         return response
 
     async def render_download_status(self, info_hash: str, user_id: str | None = None) -> dict[str, Any]:
+        user_id = self._bound_requester_id(user_id)
         kwargs: dict[str, Any] = {}
         if user_id:
             kwargs["params"] = {"user_id": user_id}
@@ -149,6 +157,9 @@ class AcquisitionApiClient:
         return await self._control_download(info_hash, user_id=user_id, action="delete")
 
     async def _control_download(self, info_hash: str, *, user_id: str, action: str) -> dict[str, Any]:
+        user_id = self._bound_requester_id(user_id) or ""
+        if not user_id:
+            raise AcquisitionApiError("requester_id is required")
         response = await self._request(
             "POST",
             f"/downloads/{info_hash}/{action}",
@@ -157,6 +168,12 @@ class AcquisitionApiClient:
         if not isinstance(response, dict):
             raise AcquisitionApiError("MPilot acquisition API returned an unexpected download control response")
         return response
+
+    def _bound_requester_id(self, requested_id: str | None) -> str | None:
+        requested = requested_id.strip() if requested_id and requested_id.strip() else None
+        if self.requester_id and requested and requested != self.requester_id:
+            raise AcquisitionApiError("Requester identity does not match configured MCP principal", status_code=403)
+        return self.requester_id or requested
 
     async def get_query_snapshot(self, query_id: str) -> dict[str, Any]:
         response = await self._request("GET", f"/queries/{query_id}")
@@ -200,6 +217,7 @@ def get_acquisition_client() -> AcquisitionApiClient:
     return AcquisitionApiClient(
         api_url=env_first("QBITLARR_API_URL", default=DEFAULT_ACQUISITION_API_URL) or DEFAULT_ACQUISITION_API_URL,
         api_key=env_first("QBITLARR_API_KEY"),
+        requester_id=env_first("QBITLARR_REQUESTER_ID"),
         timeout=float(env_first("QBITLARR_API_TIMEOUT_SECONDS", default="90") or "90"),
     )
 

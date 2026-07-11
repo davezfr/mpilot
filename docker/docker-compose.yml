@@ -12,7 +12,7 @@ services:
     volumes:
       - ./data/prowlarr:/config
     ports:
-      - "9696:9696"
+      - "127.0.0.1:9696:9696"
 
   flaresolverr:
     image: ghcr.io/flaresolverr/flaresolverr:v3.5.0
@@ -21,9 +21,6 @@ services:
     environment:
       LOG_LEVEL: ${FLARESOLVERR_LOG_LEVEL:-info}
       TZ: ${TZ:-Europe/Paris}
-    ports:
-      - "8191:8191"
-
   mpilot:
     build:
       context: ..
@@ -39,7 +36,7 @@ services:
       MPILOT_QBIT_URL: ${MPILOT_QBIT_URL:-}
       MPILOT_QBIT_USERNAME: ${MPILOT_QBIT_USERNAME:-}
       MPILOT_QBIT_PASSWORD: ${MPILOT_QBIT_PASSWORD:-}
-      MPILOT_ACQUISITION_API_KEY: ${MPILOT_ACQUISITION_API_KEY:-}
+      MPILOT_ACQUISITION_API_KEY: ${MPILOT_ACQUISITION_API_KEY:?MPILOT_ACQUISITION_API_KEY is required}
       MPILOT_ACQUISITION_SAVE_PATH_MOVIE: ${MPILOT_ACQUISITION_SAVE_PATH_MOVIE:-/downloads/movies}
       MPILOT_ACQUISITION_SAVE_PATH_MOVIE_4K: ${MPILOT_ACQUISITION_SAVE_PATH_MOVIE_4K:-/downloads/movies-4k}
       MPILOT_ACQUISITION_SAVE_PATH_TV: ${MPILOT_ACQUISITION_SAVE_PATH_TV:-/downloads/tv}
@@ -64,7 +61,7 @@ services:
     volumes:
       - ./data/mpilot:/app/data
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     healthcheck:
       test:
         [

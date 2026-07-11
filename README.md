@@ -140,6 +140,8 @@ Acquisition is the Prowlarr -> qBittorrent side of MPilot.
 MPILOT_PROWLARR_URL=http://prowlarr:9696
 MPILOT_PROWLARR_API_KEY=replace-with-prowlarr-api-key
 
+MPILOT_ACQUISITION_API_KEY=replace-with-a-long-random-secret
+
 MPILOT_QBIT_URL=http://host.docker.internal:8080
 MPILOT_QBIT_USERNAME=replace-with-webui-username
 MPILOT_QBIT_PASSWORD=replace-with-webui-password
@@ -148,6 +150,20 @@ MPILOT_ACQUISITION_SAVE_PATH_MOVIE=/downloads/movies
 MPILOT_ACQUISITION_SAVE_PATH_MOVIE_4K=/downloads/movies-4k
 MPILOT_ACQUISITION_SAVE_PATH_TV=/downloads/tv
 ```
+
+The acquisition REST API fails closed when `MPILOT_ACQUISITION_API_KEY` is
+unset. Clients must send the same value in `X-API-Key`. For a strictly local
+development process only, you can explicitly set
+`MPILOT_ALLOW_UNAUTHENTICATED_LOOPBACK=true`; do not use that escape hatch for
+Docker, LAN, reverse-proxy, or shared deployments.
+
+`MPILOT_ACQUISITION_API_KEY` is an administrator credential. For a shared bot,
+configure a JSON map of requester IDs to distinct secrets in
+`MPILOT_ACQUISITION_REQUESTER_API_KEYS`, and set each client process's
+`MPILOT_ACQUISITION_REQUESTER_ID` to the matching requester ID. A requester
+credential cannot select another requester's downloads or snapshots. If one
+torrent is tagged for multiple requesters, pause, resume, and delete are denied
+until an administrator resolves the shared ownership.
 
 Use a LAN URL instead of `host.docker.internal` when qBittorrent runs on a NAS,
 seedbox, or another machine.
@@ -217,7 +233,14 @@ Key tools:
 - `acquisition_render_downloads_status` - return a chat-ready progress card.
 - `job_create_video` - create a subtitle job for a direct local video path.
 - `job_start` / `job_show` - run and inspect subtitle jobs.
-- `queue_status` / `workflow_show` - inspect long-running workflow state.
+- `queue_status` / `workflow_show` - inspect long-running workflow state when
+  operator tools are explicitly enabled.
+
+Raw Runtime store tools are disabled by default; trusted operator integrations
+can enable them with `MPILOT_ENABLE_RUNTIME_OPERATOR_TOOLS=true`. Destructive
+acquisition controls are likewise opt-in through
+`MPILOT_ENABLE_ACQUISITION_CONTROL_TOOLS=true`. Keep both disabled for
+untrusted or requester-scoped MCP clients.
 
 For subtitle-only MCP:
 
@@ -279,7 +302,9 @@ mpilot-daemon --once
 ```
 
 Deployment templates are in `docs/deploy/launchd.plist` and
-`docs/deploy/systemd.service`.
+`docs/deploy/systemd.service`. The daemon and other MPilot entrypoints load the
+nearest project `.env` automatically without replacing variables already set
+by the service manager. Set `MPILOT_NO_DOTENV=true` to disable this behavior.
 
 ## Docker
 
@@ -293,6 +318,13 @@ docker build -f docker/Dockerfile .
 qBittorrent is intentionally external. Point MPilot at your existing
 qBittorrent Web UI.
 
+Compose requires an acquisition API key and should be launched with the root
+project environment file explicitly:
+
+```sh
+docker compose --env-file .env -f docker/docker-compose.yml up -d
+```
+
 ## Migration From qBitlarr And Babelarr
 
 MPilot replaces the separate qBitlarr and Babelarr repositories. Those projects
@@ -305,6 +337,12 @@ For new integrations:
 - Use `acquisition_*` tools for download-only workflows.
 - Use `job_*`, `plex_search`, and `subtitle_plan` for subtitle-only workflows.
 - Prefer `MPILOT_*` environment variables.
+
+Requester ownership tags created by hardened MPilot releases include a digest
+of the full requester ID. Torrents tagged by an older release are deliberately
+not accepted by requester-scoped controls; submitting the same torrent again
+through MPilot for the correct requester adds the new tag without duplicating
+the qBittorrent job.
 
 See [docs/MIGRATION.md](docs/MIGRATION.md) for old-to-new command,
 environment, MCP, and data-location mappings.

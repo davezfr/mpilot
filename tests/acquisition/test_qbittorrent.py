@@ -5,9 +5,13 @@ import base64
 import hashlib
 from types import SimpleNamespace
 
+import pytest
+
+from mpilot.acquisition.exceptions import SharedDownloadControlError, UpstreamServiceError
 from mpilot.acquisition.services.qbittorrent import (
     _TORRENT_FILE_CACHE,
     _TORRENT_FILE_CACHE_MAX_ENTRIES,
+    _requester_tag_for_user,
     add_download_to_qbittorrent,
     cleanup_completed_downloads_from_qbittorrent,
     delete_download_from_qbittorrent,
@@ -135,11 +139,30 @@ def _fake_torrent(hash_value=INFO_HASH, **overrides):
 
 
 class FakeTorrentResponse:
-    content = TORRENT_CONTENT
-    headers = {"content-type": "application/x-bittorrent"}
+    def __init__(
+        self,
+        *,
+        content=TORRENT_CONTENT,
+        headers=None,
+        status_code=200,
+        url=None,
+    ):
+        self.content = content
+        self.headers = headers or {"content-type": "application/x-bittorrent"}
+        self.status_code = status_code
+        self.url = url
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
 
     def raise_for_status(self):
         return None
+
+    async def aiter_bytes(self):
+        yield self.content
 
 
 class FakeAsyncClient:
@@ -154,9 +177,60 @@ class FakeAsyncClient:
     async def __aexit__(self, exc_type, exc, tb):
         return None
 
-    async def get(self, url):
+    def stream(self, method, url):
+        assert method == "GET"
         self.fetched_urls.append(url)
-        return FakeTorrentResponse()
+        return FakeTorrentResponse(url=url)
+
+
+class FakeLargeTorrentResponse:
+    headers = {"content-type": "application/x-bittorrent"}
+    status_code = 200
+    chunks_yielded = 0
+
+    def __init__(self, *, url=None):
+        self.url = url
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    def raise_for_status(self):
+        return None
+
+    async def aiter_bytes(self):
+        for chunk in (b"x" * (6 * 1024 * 1024), b"y" * (6 * 1024 * 1024), b"not-read"):
+            type(self).chunks_yielded += 1
+            yield chunk
+
+
+class FakeLargeAsyncClient(FakeAsyncClient):
+    def stream(self, method, url):
+        assert method == "GET"
+        self.fetched_urls.append(url)
+        return FakeLargeTorrentResponse(url=url)
+
+
+class FakeInvalidTorrentAsyncClient(FakeAsyncClient):
+    def stream(self, method, url):
+        assert method == "GET"
+        self.fetched_urls.append(url)
+        return FakeTorrentResponse(content=b"not-bencoded-torrent-data", url=url)
+
+
+class FakeRedirectAsyncClient(FakeAsyncClient):
+    redirect_location = "http://127.0.0.1:8080/internal"
+
+    def stream(self, method, url):
+        assert method == "GET"
+        self.fetched_urls.append(url)
+        return FakeTorrentResponse(
+            headers={"location": self.redirect_location},
+            status_code=302,
+            url=url,
+        )
 
 
 def _settings():
@@ -192,6 +266,7 @@ def _reset_fakes():
     FakeQbittorrentClient.torrent_tags_by_hash = {}
     FakeQbittorrentClient.torrent_overrides_by_hash = {}
     FakeAsyncClient.fetched_urls = []
+    FakeLargeTorrentResponse.chunks_yielded = 0
     _TORRENT_FILE_CACHE.clear()
 
 
@@ -295,6 +370,86 @@ def test_add_download_does_not_duplicate_existing_prowlarr_api_key(monkeypatch):
     assert FakeAsyncClient.fetched_urls == ["http://prowlarr.test/1/download?link=abc&apikey=already"]
 
 
+def test_add_download_rejects_unconfigured_http_torrent_origin_before_fetch(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(UpstreamServiceError, match="not allowed"):
+        asyncio.run(add_download_to_qbittorrent("http://127.0.0.1:9696/download/1.torrent", _settings()))
+
+    assert FakeAsyncClient.fetched_urls == []
+    assert FakeQbittorrentClient.calls == []
+
+
+def test_add_download_allows_explicitly_configured_loopback_prowlarr(monkeypatch):
+    _reset_fakes()
+    settings = _settings()
+    settings.prowlarr_url = "http://127.0.0.1:9696"
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+
+    asyncio.run(add_download_to_qbittorrent("http://127.0.0.1:9696/download/1.torrent", settings))
+
+    assert FakeAsyncClient.fetched_urls == ["http://127.0.0.1:9696/download/1.torrent?apikey=secret"]
+    assert FakeQbittorrentClient.calls[0]["torrent_files"] == TORRENT_CONTENT
+
+
+@pytest.mark.parametrize(
+    "download_link",
+    [
+        "http://prowlarr.test:22/internal",
+        "https://prowlarr.test/internal",
+        "http://user@prowlarr.test/internal",
+    ],
+)
+def test_add_download_rejects_scheme_port_or_credentials_outside_configured_origin(monkeypatch, download_link):
+    _reset_fakes()
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(UpstreamServiceError, match="not allowed"):
+        asyncio.run(add_download_to_qbittorrent(download_link, _settings()))
+
+    assert FakeAsyncClient.fetched_urls == []
+    assert FakeQbittorrentClient.calls == []
+
+
+def test_add_download_rejects_cross_origin_redirect_before_following_it(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeRedirectAsyncClient)
+
+    with pytest.raises(UpstreamServiceError, match="not allowed"):
+        asyncio.run(add_download_to_qbittorrent("http://prowlarr.test/1/download", _settings()))
+
+    assert FakeAsyncClient.fetched_urls == ["http://prowlarr.test/1/download?apikey=secret"]
+    assert FakeQbittorrentClient.calls == []
+
+
+def test_add_download_rejects_oversized_http_torrent_response(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeLargeAsyncClient)
+
+    with pytest.raises(UpstreamServiceError, match="too large"):
+        asyncio.run(add_download_to_qbittorrent("http://prowlarr.test/1/download?link=abc", _settings()))
+
+    assert FakeLargeTorrentResponse.chunks_yielded == 2
+    assert FakeQbittorrentClient.calls == []
+
+
+def test_add_download_rejects_invalid_torrent_payload(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.httpx.AsyncClient", FakeInvalidTorrentAsyncClient)
+
+    with pytest.raises(UpstreamServiceError, match="invalid torrent data"):
+        asyncio.run(add_download_to_qbittorrent("http://prowlarr.test/1/download", _settings()))
+
+    assert FakeQbittorrentClient.calls == []
+
+
 def test_torrent_file_cache_evicts_oldest_entry_when_full(monkeypatch):
     _reset_fakes()
     monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
@@ -380,16 +535,17 @@ def test_add_download_tags_new_torrent_for_requester(monkeypatch):
         )
     )
 
+    requester_tag = _requester_tag_for_user("telegram:123456789")
     assert FakeQbittorrentClient.calls == [
         {
             "torrent_files": TORRENT_CONTENT,
-            "tags": "qbitlarr.managed,requester.telegram-123456789",
+            "tags": f"qbitlarr.managed,{requester_tag}",
             "save_path": None,
         }
     ]
     assert FakeQbittorrentClient.tag_calls == [
         {
-            "tags": "qbitlarr.managed,requester.telegram-123456789",
+            "tags": f"qbitlarr.managed,{requester_tag}",
             "torrent_hashes": INFO_HASH,
         }
     ]
@@ -409,13 +565,24 @@ def test_add_download_tags_existing_torrent_for_new_requester(monkeypatch):
         )
     )
 
+    requester_tag = _requester_tag_for_user("telegram:123456789")
     assert FakeQbittorrentClient.calls == []
     assert FakeQbittorrentClient.tag_calls == [
         {
-            "tags": "qbitlarr.managed,requester.telegram-123456789",
+            "tags": f"qbitlarr.managed,{requester_tag}",
             "torrent_hashes": INFO_HASH,
         }
     ]
+
+
+def test_requester_tags_include_original_id_digest_to_prevent_sanitization_collisions():
+    colon_tag = _requester_tag_for_user("telegram:123")
+    dash_tag = _requester_tag_for_user("telegram-123")
+
+    assert colon_tag != dash_tag
+    assert colon_tag.startswith("requester.telegram-123-")
+    assert dash_tag.startswith("requester.telegram-123-")
+    assert len(_requester_tag_for_user("telegram:" + ("x" * 200))) <= 64
 
 
 def test_add_download_applies_optional_retention_policy_to_new_torrent(monkeypatch):
@@ -481,8 +648,8 @@ def test_list_downloads_filters_by_requester_tag(monkeypatch):
     _reset_fakes()
     FakeQbittorrentClient.existing_hashes = [INFO_HASH, "otherhash"]
     FakeQbittorrentClient.torrent_tags_by_hash = {
-        INFO_HASH: {"requester.telegram-123456789"},
-        "otherhash": {"requester.telegram-12345"},
+        INFO_HASH: {_requester_tag_for_user("telegram:123456789")},
+        "otherhash": {_requester_tag_for_user("telegram:12345")},
     }
     monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
@@ -495,7 +662,7 @@ def test_get_download_status_respects_requester_tag_filter(monkeypatch):
     _reset_fakes()
     FakeQbittorrentClient.existing_hashes = [INFO_HASH]
     FakeQbittorrentClient.torrent_tags_by_hash = {
-        INFO_HASH: {"requester.telegram-123456789"},
+        INFO_HASH: {_requester_tag_for_user("telegram:123456789")},
     }
     monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
@@ -514,7 +681,7 @@ def test_pause_download_requires_matching_requester_tag(monkeypatch):
     _reset_fakes()
     FakeQbittorrentClient.existing_hashes = [INFO_HASH]
     FakeQbittorrentClient.torrent_tags_by_hash = {
-        INFO_HASH: {"requester.telegram-123456789"},
+        INFO_HASH: {_requester_tag_for_user("telegram:123456789")},
     }
     monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
@@ -535,7 +702,7 @@ def test_resume_download_requires_matching_requester_tag(monkeypatch):
     _reset_fakes()
     FakeQbittorrentClient.existing_hashes = [INFO_HASH]
     FakeQbittorrentClient.torrent_tags_by_hash = {
-        INFO_HASH: {"requester.telegram-123456789"},
+        INFO_HASH: {_requester_tag_for_user("telegram:123456789")},
     }
     monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
@@ -560,7 +727,7 @@ def test_delete_download_requires_matching_requester_tag_and_keeps_files(monkeyp
     _reset_fakes()
     FakeQbittorrentClient.existing_hashes = [INFO_HASH]
     FakeQbittorrentClient.torrent_tags_by_hash = {
-        INFO_HASH: {"requester.telegram-123456789"},
+        INFO_HASH: {_requester_tag_for_user("telegram:123456789")},
     }
     monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
 
@@ -579,6 +746,29 @@ def test_delete_download_requires_matching_requester_tag_and_keeps_files(monkeyp
             "torrent_hashes": INFO_HASH,
         }
     ]
+
+
+@pytest.mark.parametrize(
+    "control",
+    [pause_download_in_qbittorrent, resume_download_in_qbittorrent, delete_download_from_qbittorrent],
+)
+def test_requester_cannot_control_download_shared_with_another_requester(monkeypatch, control):
+    _reset_fakes()
+    FakeQbittorrentClient.existing_hashes = [INFO_HASH]
+    FakeQbittorrentClient.torrent_tags_by_hash = {
+        INFO_HASH: {
+            _requester_tag_for_user("telegram:first"),
+            _requester_tag_for_user("telegram:second"),
+        },
+    }
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+
+    with pytest.raises(SharedDownloadControlError, match="shared by multiple requesters"):
+        asyncio.run(control(_settings(), INFO_HASH, requester_id="telegram:first"))
+
+    assert FakeQbittorrentClient.pause_calls == []
+    assert FakeQbittorrentClient.resume_calls == []
+    assert FakeQbittorrentClient.delete_calls == []
 
 
 def test_download_control_does_not_touch_torrent_for_wrong_requester(monkeypatch):

@@ -31,6 +31,12 @@ HttpPost = Callable[[str, Dict[str, Any], Dict[str, str], float], Dict[str, Any]
 HttpDownload = Callable[[str, Dict[str, str], float], bytes]
 DEFAULT_DOWNLOAD_USER_AGENT = "MediaSubtitleTranslator v0.1.0"
 SUPPORTED_DOWNLOADED_SUBTITLE_SUFFIXES = {".srt", ".ass", ".ssa", ".vtt", ".sub"}
+MAX_PROVIDER_JSON_BYTES = 5 * 1024 * 1024
+MAX_PROVIDER_DOWNLOAD_BYTES = 50 * 1024 * 1024
+MAX_ZIP_MEMBERS = 1_000
+MAX_EXTRACTED_SUBTITLE_BYTES = 20 * 1024 * 1024
+MAX_ZIP_COMPRESSION_RATIO = 200
+MAX_HTTP_ERROR_BYTES = 64 * 1024
 DOWNLOADED_SUBTITLE_SUFFIX_PREFERENCE = {
     ".srt": 0,
     ".ass": 1,
@@ -141,14 +147,15 @@ class DownloadedSubtitle:
 
 
 def get_json(url: str, params: Dict[str, str], headers: Dict[str, str], timeout: float) -> Dict[str, Any]:
+    _require_http_url(url, "subtitle provider URL")
     query = urllib.parse.urlencode(params)
     full_url = url + ("?" + query if query else "")
     request = urllib.request.Request(full_url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8")
+            body = _read_limited(response, MAX_PROVIDER_JSON_BYTES, "subtitle provider JSON response").decode("utf-8")
     except urllib.error.HTTPError as error:
-        detail = compact_error_detail(error.read().decode("utf-8", errors="replace"))
+        detail = compact_error_detail(error.read(MAX_HTTP_ERROR_BYTES + 1).decode("utf-8", errors="replace"))
         message = "subtitle provider request failed: HTTP %s" % error.code
         if detail:
             message += " %s" % detail
@@ -157,18 +164,21 @@ def get_json(url: str, params: Dict[str, str], headers: Dict[str, str], timeout:
         raise SubtitleProviderApiError("subtitle provider request failed: %s" % error.reason) from error
     try:
         return json.loads(body)
-    except json.JSONDecodeError as error:
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
         raise SubtitleProviderApiError("subtitle provider returned non-JSON response") from error
 
 
 def post_json(url: str, body: Dict[str, Any], headers: Dict[str, str], timeout: float) -> Dict[str, Any]:
+    _require_http_url(url, "subtitle provider URL")
     payload = json.dumps(body).encode("utf-8")
     request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            response_body = response.read().decode("utf-8")
+            response_body = _read_limited(
+                response, MAX_PROVIDER_JSON_BYTES, "subtitle provider JSON response"
+            ).decode("utf-8")
     except urllib.error.HTTPError as error:
-        detail = compact_error_detail(error.read().decode("utf-8", errors="replace"))
+        detail = compact_error_detail(error.read(MAX_HTTP_ERROR_BYTES + 1).decode("utf-8", errors="replace"))
         message = "subtitle provider request failed: HTTP %s" % error.code
         if detail:
             message += " %s" % detail
@@ -177,17 +187,18 @@ def post_json(url: str, body: Dict[str, Any], headers: Dict[str, str], timeout: 
         raise SubtitleProviderApiError("subtitle provider request failed: %s" % error.reason) from error
     try:
         return json.loads(response_body)
-    except json.JSONDecodeError as error:
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
         raise SubtitleProviderApiError("subtitle provider returned non-JSON response") from error
 
 
 def download_bytes(url: str, headers: Dict[str, str], timeout: float) -> bytes:
+    _require_http_url(url, "subtitle download URL")
     request = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.read()
+            return _read_limited(response, MAX_PROVIDER_DOWNLOAD_BYTES, "subtitle download")
     except urllib.error.HTTPError as error:
-        detail = compact_error_detail(error.read().decode("utf-8", errors="replace"))
+        detail = compact_error_detail(error.read(MAX_HTTP_ERROR_BYTES + 1).decode("utf-8", errors="replace"))
         message = "subtitle download failed: HTTP %s" % error.code
         if detail:
             message += " %s" % detail
@@ -198,6 +209,18 @@ def download_bytes(url: str, headers: Dict[str, str], timeout: float) -> bytes:
 
 def compact_params(params: Dict[str, Optional[str]]) -> Dict[str, str]:
     return {key: str(value) for key, value in params.items() if value not in (None, "")}
+
+
+def _read_limited(stream: Any, limit: int, description: str) -> bytes:
+    payload = stream.read(limit + 1)
+    if len(payload) > limit:
+        raise SubtitleProviderApiError(f"{description} exceeded the {limit}-byte limit")
+    return payload
+
+
+def _require_http_url(url: str, description: str) -> None:
+    if urllib.parse.urlparse(url).scheme.casefold() not in {"http", "https"}:
+        raise SubtitleProviderApiError(f"{description} must use http or https")
 
 
 def normalize_candidate_language(language: Any) -> Optional[str]:
@@ -252,6 +275,10 @@ def write_downloaded_subtitle(
     target_season: Optional[int] = None,
     target_episode: Optional[int] = None,
 ) -> DownloadedSubtitle:
+    if len(payload) > MAX_PROVIDER_DOWNLOAD_BYTES:
+        raise SubtitleProviderApiError(
+            f"subtitle download exceeded the {MAX_PROVIDER_DOWNLOAD_BYTES}-byte limit"
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     file_name = sanitized_filename(suggested_name or url_filename(source_url) or "subtitle.srt")
     if is_zip_download(file_name, payload):
@@ -294,19 +321,29 @@ def extract_first_subtitle_from_zip(
     target_season: Optional[int] = None,
     target_episode: Optional[int] = None,
 ) -> Path:
-    with zipfile.ZipFile(archive_path) as archive:
-        members = _supported_zip_subtitle_members(archive)
-        selected = _select_zip_subtitle_member(members, target_season, target_episode)
-        if selected is not None:
-            member_name = PurePosixPath(selected.filename)
-            output_path = output_dir / sanitized_filename(member_name.name)
-            ensure_can_write_download(output_path, force)
-            output_path.write_bytes(archive.read(selected))
-            return output_path
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            members = _supported_zip_subtitle_members(archive)
+            selected = _select_zip_subtitle_member(members, target_season, target_episode)
+            if selected is not None:
+                _validate_zip_subtitle_member(selected)
+                member_name = PurePosixPath(selected.filename)
+                output_path = output_dir / sanitized_filename(member_name.name)
+                ensure_can_write_download(output_path, force)
+                with archive.open(selected) as source:
+                    payload = _read_limited(source, MAX_EXTRACTED_SUBTITLE_BYTES, "extracted subtitle")
+                output_path.write_bytes(payload)
+                return output_path
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError) as error:
+        if isinstance(error, SubtitleProviderApiError):
+            raise
+        raise SubtitleProviderApiError("downloaded zip could not be safely extracted") from error
     raise SubtitleProviderApiError("downloaded zip did not contain a supported subtitle file")
 
 
 def _supported_zip_subtitle_members(archive: zipfile.ZipFile) -> List[zipfile.ZipInfo]:
+    if len(archive.infolist()) > MAX_ZIP_MEMBERS:
+        raise SubtitleProviderApiError(f"downloaded zip exceeded the {MAX_ZIP_MEMBERS}-member limit")
     members = []
     for member in archive.infolist():
         if member.is_dir():
@@ -318,6 +355,17 @@ def _supported_zip_subtitle_members(archive: zipfile.ZipFile) -> List[zipfile.Zi
             continue
         members.append(member)
     return members
+
+
+def _validate_zip_subtitle_member(member: zipfile.ZipInfo) -> None:
+    if member.file_size > MAX_EXTRACTED_SUBTITLE_BYTES:
+        raise SubtitleProviderApiError(
+            f"extracted subtitle exceeded the {MAX_EXTRACTED_SUBTITLE_BYTES}-byte limit"
+        )
+    if member.file_size and (
+        member.compress_size <= 0 or member.file_size / member.compress_size > MAX_ZIP_COMPRESSION_RATIO
+    ):
+        raise SubtitleProviderApiError("downloaded zip subtitle had an unsafe compression ratio")
 
 
 def _select_zip_subtitle_member(

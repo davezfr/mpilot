@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
-from contextlib import suppress
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
-from hmac import compare_digest
 from typing import Awaitable, Callable
+
+from mpilot.core.dotenv import load_project_dotenv
 
 from fastapi import FastAPI, Request
 from fastapi_mcp import FastApiMCP
@@ -18,6 +21,7 @@ from mpilot.api.handle import get_categories, router as handle_router
 from mpilot.api.prowlarr import router as prowlarr_router
 from mpilot.api.query_snapshots import router as query_snapshots_router
 from mpilot.api.search import router as search_router
+from mpilot.api.auth import ApiAuthConfigurationError, authenticate_api_key, requester_api_keys
 from mpilot.acquisition.config import Settings, get_settings
 from mpilot.acquisition.domain.quality import calculate_score
 from mpilot.acquisition.domain.search_results import build_prowlarr_search_params, normalize_search_results
@@ -50,6 +54,8 @@ from mpilot.acquisition.services.qbittorrent import (
 )
 from mpilot.acquisition.services.query_snapshots import QuerySnapshotStore
 
+load_project_dotenv()
+
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -57,21 +63,60 @@ logging.basicConfig(
 )
 logger = logging.getLogger("mpilot.acquisition.api")
 
-app = FastAPI(title="MPilot Acquisition API")
 _cleanup_task: asyncio.Task | None = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    await start_cleanup_task()
+    try:
+        yield
+    finally:
+        await stop_cleanup_task()
+
+
+app = FastAPI(title="MPilot Acquisition API", lifespan=lifespan)
 
 
 @app.middleware("http")
 async def require_api_key(request: Request, call_next):
-    expected_api_key = (acquisition_env_first("QBITLARR_API_KEY", default="") or "").strip()
-    if expected_api_key:
-        provided_api_key = request.headers.get("X-API-Key", "")
-        if not compare_digest(provided_api_key, expected_api_key):
-            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+    try:
+        configured_requester_keys = requester_api_keys()
+        has_configured_key = bool(
+            (acquisition_env_first("QBITLARR_API_KEY", default="") or "").strip()
+            or configured_requester_keys
+        )
+        authenticated, requester_id = authenticate_api_key(request.headers.get("X-API-Key", ""))
+    except ApiAuthConfigurationError as exc:
+        return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+    if authenticated:
+        request.state.auth_is_admin = requester_id is None
+        request.state.auth_requester_id = requester_id
+    elif not has_configured_key and _env_truthy("MPILOT_ALLOW_UNAUTHENTICATED_LOOPBACK") and _is_loopback_request(request):
+        request.state.auth_is_admin = True
+        request.state.auth_requester_id = None
+    elif has_configured_key:
+        return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+    else:
+        return JSONResponse(status_code=401, content={"detail": "MPilot acquisition API key is required"})
     return await call_next(request)
 
 
-@app.on_event("startup")
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _is_loopback_request(request: Request) -> bool:
+    host = getattr(request.client, "host", "") if request.client else ""
+    if host in {"testclient", "localhost"}:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 async def start_cleanup_task() -> None:
     global _cleanup_task
     try:
@@ -84,7 +129,6 @@ async def start_cleanup_task() -> None:
         _cleanup_task = asyncio.create_task(_cleanup_completed_downloads_loop(settings))
 
 
-@app.on_event("shutdown")
 async def stop_cleanup_task() -> None:
     global _cleanup_task
     if _cleanup_task is None:

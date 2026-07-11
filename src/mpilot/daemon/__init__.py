@@ -115,7 +115,7 @@ def run_daemon(
         while True:
             cycles += 1
             summary = asyncio.run(run_daemon_once(**kwargs))
-            if summary.get("status") not in {"ok", "partial_failure"}:
+            if summary.get("status") != "ok":
                 logger.warning("MPilot daemon cycle returned %s", summary)
             time.sleep(max(0.1, interval_seconds))
     finally:

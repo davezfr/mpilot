@@ -20,7 +20,9 @@ def parse_torrent_info_hash(content: bytes) -> str | None:
     info_raw = _extract_info_raw(content)
     if not info_raw:
         return None
-    return hashlib.sha1(info_raw).hexdigest()
+    # BitTorrent v1 defines the info-hash as SHA-1; this is a protocol
+    # identifier, not a cryptographic security decision.
+    return hashlib.sha1(info_raw, usedforsecurity=False).hexdigest()
 
 
 class ParsedTorrent:
