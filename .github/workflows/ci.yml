@@ -45,7 +45,7 @@ jobs:
             "def _read_env_file_value" \
             "def _parse_telegram_target"
           do
-            matches=$(grep -RIn --include='*.py' "$pattern" . | grep -v './src/mpilot/core/' | grep -v './tests/' || true)
+            matches=$(grep -RIn --include='*.py' --exclude-dir=.git --exclude-dir=build --exclude-dir=dist "$pattern" . | grep -v './src/mpilot/core/' | grep -v './tests/' || true)
             if [ -n "$matches" ]; then
               echo "$matches"
               exit 1
