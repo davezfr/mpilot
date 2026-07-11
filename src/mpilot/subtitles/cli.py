@@ -695,7 +695,6 @@ def add_translate_plex_job_options(parser: argparse.ArgumentParser) -> None:
 
 
 def add_translate_video_job_options(parser: argparse.ArgumentParser) -> None:
-    env = os.environ
     parser.add_argument("--video-path", required=True, type=Path, help="Absolute path to the video file to translate.")
     parser.add_argument("--imdb-id", default=None, help="Optional IMDb ID for online subtitle provider search (e.g. tt1234567).")
     parser.add_argument("--title", default=None, help="Optional media title for subtitle provider search.")

@@ -148,7 +148,12 @@ def dispatch_ready_babelarr_actions(
             )
             action_requester_id = _string_value(action.get("requester_id"))
             notification_requester_id = action_requester_id or requester_id
-            action_notification_target = action_requester_id or notification_target or requester_id
+            action_notification_target = _string_value(action.get("notification_target"))
+            if not action_notification_target:
+                if notification_target and (requester_id is None or action_requester_id == requester_id):
+                    action_notification_target = notification_target
+                else:
+                    action_notification_target = action_requester_id or requester_id
             start_payload = start_job(
                 babelarr_job_id,
                 job_store_dir=_string_value(create_payload.get("job_store")) or job_store_dir,
@@ -233,15 +238,15 @@ def reconcile_terminal_babelarr_jobs(
 
 
 def _default_babelarr_job_create_video(*args: Any, **kwargs: Any) -> Dict[str, Any]:
-    from mpilot.subtitles.mcp_server import job_create_video
+    from mpilot.subtitles.mcp_server import _job_create_video_with_store
 
-    return job_create_video(*args, **kwargs)
+    return _job_create_video_with_store(*args, **kwargs)
 
 
 def _default_babelarr_job_start(*args: Any, **kwargs: Any) -> Dict[str, Any]:
-    from mpilot.subtitles.mcp_server import job_start
+    from mpilot.subtitles.mcp_server import _job_start_with_overrides
 
-    return job_start(*args, **kwargs)
+    return _job_start_with_overrides(*args, **kwargs)
 
 
 STALE_DISPATCHING_AFTER_SECONDS = 900

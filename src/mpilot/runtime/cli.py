@@ -5,7 +5,9 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence
+
+from mpilot.core.dotenv import load_project_dotenv
 
 from . import MediaWorkflowRuntime, RuntimeStoreError
 from .dispatcher import dispatch_qbitlarr_completion, dispatch_ready_babelarr_actions, reconcile_terminal_babelarr_jobs
@@ -158,6 +160,7 @@ def build_parser(prog: str = "mpilot runtime") -> argparse.ArgumentParser:
 
 
 def summary_from_argv(argv: Sequence[str], *, prog: str = "mpilot runtime") -> Dict[str, Any]:
+    load_project_dotenv()
     try:
         parser = build_parser(prog=prog)
         args = parser.parse_args(list(argv))

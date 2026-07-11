@@ -8,6 +8,7 @@ from typing import Any, Callable, TextIO
 
 from mpilot.acquisition.client import DEFAULT_ACQUISITION_API_URL, AcquisitionApiClient, AcquisitionApiError
 from mpilot.acquisition.env import env_first
+from mpilot.core.dotenv import load_project_dotenv
 
 
 ClientFactory = Callable[[argparse.Namespace], AcquisitionApiClient]
@@ -83,6 +84,7 @@ def _default_client_factory(args: argparse.Namespace) -> AcquisitionApiClient:
         api_url=args.api_url,
         api_key=args.api_key,
         timeout=args.timeout,
+        requester_id=env_first("QBITLARR_REQUESTER_ID"),
     )
 
 
@@ -94,6 +96,7 @@ def main(
     prog: str = "mpilot acquisition",
     client_factory: ClientFactory = _default_client_factory,
 ) -> int:
+    load_project_dotenv()
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
     parser = build_parser(prog=prog)

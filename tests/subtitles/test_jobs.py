@@ -141,6 +141,30 @@ class JobStoreTests(unittest.TestCase):
             self.assertEqual(stale_tmp.read_text(encoding="utf-8"), "another writer temp file\n")
             self.assertEqual(store.get(job["job_id"])["status"], "running")
 
+    def test_list_quarantines_corrupt_job_and_keeps_valid_jobs_available(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp))
+            valid = store.create("translate-plex", sample_request(), now="2026-06-10T12:00:00Z")
+            corrupt_path = Path(tmp) / "job_corrupt.json"
+            corrupt_path.write_text("{broken", encoding="utf-8")
+
+            jobs = store.list()
+
+            self.assertEqual([job["job_id"] for job in jobs], [valid["job_id"]])
+            self.assertFalse(corrupt_path.exists())
+            self.assertTrue((Path(tmp) / "job_corrupt.json.corrupt").exists())
+
+    def test_get_quarantines_corrupt_job_and_reports_store_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = JobStore(Path(tmp))
+            corrupt_path = Path(tmp) / "job_corrupt.json"
+            corrupt_path.write_text("[]", encoding="utf-8")
+
+            with self.assertRaisesRegex(JobStoreError, "corrupt job state quarantined"):
+                store.get("job_corrupt")
+
+            self.assertTrue((Path(tmp) / "job_corrupt.json.corrupt").exists())
+
     def test_prune_deletes_old_orphan_temp_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = JobStore(Path(tmp))

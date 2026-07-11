@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
+from mpilot.api.auth import require_snapshot_owner
 from mpilot.acquisition.config import get_settings
 from mpilot.acquisition.exceptions import ConfigurationError
 from mpilot.acquisition.models import QuerySnapshot
@@ -22,10 +23,13 @@ router = APIRouter()
     description="Return the stored search snapshot document for a previous acquisition_handle query_id.",
     tags=["acquisition"],
 )
-async def get_query_snapshot(query_id: str) -> QuerySnapshot:
+async def get_query_snapshot(query_id: str, request: Request) -> QuerySnapshot:
     try:
         settings = get_settings()
-        return QuerySnapshotStore(settings.query_snapshot_dir).read(query_id)
+        snapshot = QuerySnapshotStore(settings.query_snapshot_dir).read(query_id)
+        owner_id = snapshot.request.get("requester_id") if isinstance(snapshot.request, dict) else None
+        require_snapshot_owner(request, owner_id if isinstance(owner_id, str) else None)
+        return snapshot
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Query snapshot not found") from exc
     except ConfigurationError as exc:

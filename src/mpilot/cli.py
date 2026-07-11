@@ -4,10 +4,6 @@ import argparse
 import sys
 from typing import Sequence
 
-from mpilot.acquisition.cli import main as acquisition_main
-from mpilot.runtime.cli import main as runtime_main
-from mpilot.subtitles.cli import main as subtitles_main
-
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
@@ -23,10 +19,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     command, remainder = args[0], args[1:]
     if command == "acquisition":
+        from mpilot.acquisition.cli import main as acquisition_main
+
         return acquisition_main(remainder, prog="mpilot acquisition")
     if command == "subtitles":
+        from mpilot.subtitles.cli import main as subtitles_main
+
         return subtitles_main(remainder, prog="mpilot subtitles")
     if command == "runtime":
+        from mpilot.runtime.cli import main as runtime_main
+
         return runtime_main(remainder, prog="mpilot runtime")
     parser.error("unknown command: %s" % command)
     return 2

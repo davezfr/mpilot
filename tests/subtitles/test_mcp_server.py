@@ -1,3 +1,4 @@
+import inspect
 import os
 import sys
 import types
@@ -29,10 +30,6 @@ class McpServerTests(unittest.TestCase):
                 season=1,
                 episode=2,
                 limit=15,
-                plex_base_url="http://plex.test:32400",
-                plex_token="token",
-                plex_path_prefix="/server/media",
-                local_path_prefix="/mnt/media",
             )
 
         self.assertEqual(result, {"status": "single_match"})
@@ -50,14 +47,6 @@ class McpServerTests(unittest.TestCase):
                 "2",
                 "--limit",
                 "15",
-                "--plex-base-url",
-                "http://plex.test:32400",
-                "--plex-token",
-                "token",
-                "--plex-path-prefix",
-                "/server/media",
-                "--local-path-prefix",
-                "/mnt/media",
             ],
         )
 
@@ -67,10 +56,6 @@ class McpServerTests(unittest.TestCase):
                 rating_key="1468",
                 target_language="zh",
                 preferred_source_language="en",
-                plex_base_url="http://plex.test:32400",
-                plex_token="token",
-                plex_path_prefix="/server/media",
-                local_path_prefix="/mnt/media",
             )
 
         self.assertEqual(result, {"status": "planned"})
@@ -80,14 +65,6 @@ class McpServerTests(unittest.TestCase):
                 "subtitle-plan",
                 "--rating-key",
                 "1468",
-                "--plex-base-url",
-                "http://plex.test:32400",
-                "--plex-token",
-                "token",
-                "--plex-path-prefix",
-                "/server/media",
-                "--local-path-prefix",
-                "/mnt/media",
                 "--target-language",
                 "zh",
                 "--preferred-source-language",
@@ -106,7 +83,6 @@ class McpServerTests(unittest.TestCase):
                 backend="fake",
                 write_back=True,
                 work_dir="/tmp/babelarr-job",
-                job_store_dir="/tmp/babelarr-jobs",
             )
 
         self.assertEqual(result["job"]["job_id"], "job_123")
@@ -114,8 +90,6 @@ class McpServerTests(unittest.TestCase):
             run.call_args.args[0],
             [
                 "job-create",
-                "--job-store-dir",
-                "/tmp/babelarr-jobs",
                 "--imdb",
                 "tt1234567",
                 "--season",
@@ -147,7 +121,6 @@ class McpServerTests(unittest.TestCase):
                 target_language="zh",
                 output_mode="bilingual-ass",
                 allow_provider_fallback_language=True,
-                job_store_dir="/tmp/babelarr-jobs",
             )
 
         self.assertEqual(result["job"]["job_id"], "job_123")
@@ -157,8 +130,6 @@ class McpServerTests(unittest.TestCase):
                 "job-create-video",
                 "--video-path",
                 "/media/Movie.mkv",
-                "--job-store-dir",
-                "/tmp/babelarr-jobs",
                 "--media-type",
                 "episode",
                 "--season",
@@ -179,10 +150,7 @@ class McpServerTests(unittest.TestCase):
         with patch.object(mcp_server, "run_cli_summary", return_value={"status": "started"}) as run:
             result = mcp_server.job_start(
                 "job_123",
-                job_store_dir="/tmp/babelarr-jobs",
-                plex_token="token",
                 allow_low_confidence_subtitle=True,
-                subdl_api_key="subdl-key",
             )
 
         self.assertEqual(result["status"], "started")
@@ -190,13 +158,7 @@ class McpServerTests(unittest.TestCase):
             run.call_args.args[0],
             [
                 "job-start",
-                "--job-store-dir",
-                "/tmp/babelarr-jobs",
-                "--plex-token",
-                "token",
                 "--allow-low-confidence-subtitle",
-                "--subdl-api-key",
-                "subdl-key",
                 "job_123",
             ],
         )
@@ -236,17 +198,48 @@ class McpServerTests(unittest.TestCase):
         with patch.object(mcp_server, "job_start", return_value={"status": "started"}) as start:
             result = mcp_server.job_confirm_low_confidence(
                 "job_123",
-                job_store_dir="/tmp/babelarr-jobs",
-                plex_token="token",
                 notification_target="telegram:12345",
             )
 
         self.assertEqual(result["status"], "started")
         self.assertEqual(start.call_args.args, ("job_123",))
         self.assertTrue(start.call_args.kwargs["allow_low_confidence_subtitle"])
-        self.assertEqual(start.call_args.kwargs["job_store_dir"], "/tmp/babelarr-jobs")
-        self.assertEqual(start.call_args.kwargs["plex_token"], "token")
         self.assertEqual(start.call_args.kwargs["notification_target"], "telegram:12345")
+
+    def test_mcp_tools_do_not_expose_operator_connection_or_store_overrides(self):
+        forbidden = {
+            "job_store_dir",
+            "runtime_store_dir",
+            "runtime_workflow_id",
+            "runtime_task_id",
+            "plex_base_url",
+            "plex_token",
+            "plex_path_prefix",
+            "local_path_prefix",
+            "openai_base_url",
+            "openai_api_key",
+            "opensubtitles_api_key",
+            "opensubtitles_username",
+            "opensubtitles_password",
+            "opensubtitles_token",
+            "subdl_api_key",
+        }
+        for tool_name in (
+            "plex_search",
+            "subtitle_plan",
+            "job_create",
+            "job_create_video",
+            "job_start",
+            "job_show",
+            "job_run",
+            "job_resume",
+            "job_confirm_low_confidence",
+            "job_confirm_provider_fallback_language",
+            "job_prune",
+        ):
+            with self.subTest(tool=tool_name):
+                parameters = set(inspect.signature(getattr(mcp_server, tool_name)).parameters)
+                self.assertFalse(parameters & forbidden, parameters & forbidden)
 
     def test_run_cli_summary_returns_structured_errors(self):
         with patch.dict(os.environ, {"MST_NO_DOTENV": "1", "PLEX_BASE_URL": "", "PLEX_TOKEN": ""}):

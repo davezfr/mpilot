@@ -32,10 +32,9 @@ def record_qbitlarr_download(
     episode: Optional[int] = None,
     progress: float = 0.0,
     content_path: Optional[str] = None,
-    runtime_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create or update a qBitlarr download task in the Runtime workflow store."""
-    return _runtime(runtime_store_dir).record_qbitlarr_download(
+    return _runtime().record_qbitlarr_download(
         requester_id=requester_id,
         info_hash=info_hash,
         title=title,
@@ -59,7 +58,6 @@ def record_acquisition_download(
     episode: Optional[int] = None,
     progress: float = 0.0,
     content_path: Optional[str] = None,
-    runtime_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create or update an acquisition download task in the Runtime workflow store."""
     return record_qbitlarr_download(
@@ -72,7 +70,6 @@ def record_acquisition_download(
         episode=episode,
         progress=progress,
         content_path=content_path,
-        runtime_store_dir=runtime_store_dir,
     )
 
 
@@ -84,6 +81,7 @@ def record_qbitlarr_download_with_subtitle_intent(
     target_language: str,
     output_mode: str,
     notification_language: Optional[str] = None,
+    notification_target: Optional[str] = None,
     title: Optional[str] = None,
     imdb_id: Optional[str] = None,
     media_type: Optional[str] = None,
@@ -91,10 +89,9 @@ def record_qbitlarr_download_with_subtitle_intent(
     episode: Optional[int] = None,
     progress: float = 0.0,
     content_path: Optional[str] = None,
-    runtime_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create or update a qBitlarr download and attach subtitle intent in one call."""
-    return _runtime(runtime_store_dir).record_qbitlarr_download_with_subtitle_intent(
+    return _runtime().record_qbitlarr_download_with_subtitle_intent(
         requester_id=requester_id,
         info_hash=info_hash,
         title=title,
@@ -108,6 +105,7 @@ def record_qbitlarr_download_with_subtitle_intent(
         target_language=target_language,
         output_mode=_validated_output_mode(output_mode),
         notification_language=notification_language,
+        notification_target=notification_target,
     )
 
 
@@ -119,6 +117,7 @@ def record_acquisition_download_with_subtitle_intent(
     target_language: str,
     output_mode: str,
     notification_language: Optional[str] = None,
+    notification_target: Optional[str] = None,
     title: Optional[str] = None,
     imdb_id: Optional[str] = None,
     media_type: Optional[str] = None,
@@ -126,7 +125,6 @@ def record_acquisition_download_with_subtitle_intent(
     episode: Optional[int] = None,
     progress: float = 0.0,
     content_path: Optional[str] = None,
-    runtime_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create or update an acquisition download and attach subtitle intent in one call."""
     return record_qbitlarr_download_with_subtitle_intent(
@@ -136,6 +134,7 @@ def record_acquisition_download_with_subtitle_intent(
         target_language=target_language,
         output_mode=output_mode,
         notification_language=notification_language,
+        notification_target=notification_target,
         title=title,
         imdb_id=imdb_id,
         media_type=media_type,
@@ -143,7 +142,6 @@ def record_acquisition_download_with_subtitle_intent(
         episode=episode,
         progress=progress,
         content_path=content_path,
-        runtime_store_dir=runtime_store_dir,
     )
 
 
@@ -154,15 +152,16 @@ def attach_subtitle_intent(
     target_language: str,
     output_mode: str,
     notification_language: Optional[str] = None,
-    runtime_store_dir: Optional[str] = None,
+    notification_target: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Attach subtitle intent to the requester's single active download."""
-    return _runtime(runtime_store_dir).attach_subtitle_intent_to_current_download(
+    return _runtime().attach_subtitle_intent_to_current_download(
         requester_id=requester_id,
         source_language=source_language,
         target_language=target_language,
         output_mode=_validated_output_mode(output_mode),
         notification_language=notification_language,
+        notification_target=notification_target,
     )
 
 
@@ -174,15 +173,15 @@ def record_local_video_subtitle_intent(
     target_language: str,
     output_mode: str,
     notification_language: Optional[str] = None,
+    notification_target: Optional[str] = None,
     title: Optional[str] = None,
     imdb_id: Optional[str] = None,
     media_type: Optional[str] = None,
     season: Optional[int] = None,
     episode: Optional[int] = None,
-    runtime_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Record a ready subtitle task for an already local or Plex-resolved video file."""
-    return _runtime(runtime_store_dir).record_local_video_subtitle_intent(
+    return _runtime().record_local_video_subtitle_intent(
         requester_id=requester_id,
         video_path=_map_path_from_env(video_path) or video_path,
         title=title,
@@ -194,32 +193,27 @@ def record_local_video_subtitle_intent(
         target_language=target_language,
         output_mode=_validated_output_mode(output_mode),
         notification_language=notification_language,
+        notification_target=notification_target,
     )
 
 
 def claim_ready_babelarr_job_create_video_actions(
     *,
     limit: Optional[int] = None,
-    runtime_store_dir: Optional[str] = None,
-    job_store_dir: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Claim ready Babelarr direct-video actions so they are not dispatched twice."""
-    runtime = _runtime(runtime_store_dir)
-    reconcile_terminal_babelarr_jobs(runtime, job_store_dir=_job_store_dir(job_store_dir))
+    runtime = _runtime()
+    reconcile_terminal_babelarr_jobs(runtime, job_store_dir=_job_store_dir())
     return runtime.claim_ready_babelarr_job_create_video_actions(limit=limit)
 
 
 def claim_ready_subtitle_job_create_video_actions(
     *,
     limit: Optional[int] = None,
-    runtime_store_dir: Optional[str] = None,
-    job_store_dir: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Claim ready MPilot direct-video subtitle actions so they are not dispatched twice."""
     actions = claim_ready_babelarr_job_create_video_actions(
         limit=limit,
-        runtime_store_dir=runtime_store_dir,
-        job_store_dir=job_store_dir,
     )
     return [_mpilot_subtitle_action(action) for action in actions]
 
@@ -229,10 +223,9 @@ def record_babelarr_job_created(
     workflow_id: str,
     task_id: str,
     babelarr_job_id: str,
-    runtime_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Record the Babelarr job ID returned after creating a direct-video subtitle job."""
-    return _runtime(runtime_store_dir).record_babelarr_job_created(
+    return _runtime().record_babelarr_job_created(
         workflow_id=workflow_id,
         task_id=task_id,
         babelarr_job_id=babelarr_job_id,
@@ -244,14 +237,12 @@ def record_subtitle_job_created(
     workflow_id: str,
     task_id: str,
     subtitle_job_id: str,
-    runtime_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Record the MPilot subtitle job ID returned after creating a direct-video subtitle job."""
     return record_babelarr_job_created(
         workflow_id=workflow_id,
         task_id=task_id,
         babelarr_job_id=subtitle_job_id,
-        runtime_store_dir=runtime_store_dir,
     )
 
 
@@ -263,10 +254,9 @@ def record_babelarr_job_status(
     status_detail: Optional[Dict[str, Any]] = None,
     result: Optional[Dict[str, Any]] = None,
     error: Optional[Dict[str, Any]] = None,
-    runtime_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Mirror Babelarr job status into the Runtime workflow."""
-    return _runtime(runtime_store_dir).record_babelarr_job_status(
+    return _runtime().record_babelarr_job_status(
         workflow_id=workflow_id,
         task_id=task_id,
         status=status,
@@ -284,7 +274,6 @@ def record_subtitle_job_status(
     status_detail: Optional[Dict[str, Any]] = None,
     result: Optional[Dict[str, Any]] = None,
     error: Optional[Dict[str, Any]] = None,
-    runtime_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Mirror MPilot subtitle job status into the Runtime workflow."""
     return record_babelarr_job_status(
@@ -294,21 +283,16 @@ def record_subtitle_job_status(
         status_detail=status_detail,
         result=result,
         error=error,
-        runtime_store_dir=runtime_store_dir,
     )
 
 
 def claim_ready_mst_job_create_video_actions(
     *,
     limit: Optional[int] = None,
-    runtime_store_dir: Optional[str] = None,
-    job_store_dir: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Legacy alias for claim_ready_babelarr_job_create_video_actions."""
     return claim_ready_babelarr_job_create_video_actions(
         limit=limit,
-        runtime_store_dir=runtime_store_dir,
-        job_store_dir=job_store_dir,
     )
 
 
@@ -317,14 +301,12 @@ def record_mst_job_created(
     workflow_id: str,
     task_id: str,
     mst_job_id: str,
-    runtime_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Legacy alias for record_babelarr_job_created."""
     return record_babelarr_job_created(
         workflow_id=workflow_id,
         task_id=task_id,
         babelarr_job_id=mst_job_id,
-        runtime_store_dir=runtime_store_dir,
     )
 
 
@@ -336,7 +318,6 @@ def record_mst_job_status(
     status_detail: Optional[Dict[str, Any]] = None,
     result: Optional[Dict[str, Any]] = None,
     error: Optional[Dict[str, Any]] = None,
-    runtime_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Legacy alias for record_babelarr_job_status."""
     return record_babelarr_job_status(
@@ -346,30 +327,27 @@ def record_mst_job_status(
         status_detail=status_detail,
         result=result,
         error=error,
-        runtime_store_dir=runtime_store_dir,
     )
 
 
 def queue_status(
     *,
     requester_id: Optional[str] = None,
-    runtime_store_dir: Optional[str] = None,
-    job_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return global subtitle queue counts and requester-visible task positions."""
-    runtime = _runtime(runtime_store_dir)
-    reconcile_terminal_babelarr_jobs(runtime, job_store_dir=_job_store_dir(job_store_dir))
+    runtime = _runtime()
+    reconcile_terminal_babelarr_jobs(runtime, job_store_dir=_job_store_dir())
     return runtime.queue_status(requester_id=requester_id)
 
 
-def workflow_show(*, workflow_id: str, runtime_store_dir: Optional[str] = None) -> Dict[str, Any]:
+def workflow_show(*, workflow_id: str) -> Dict[str, Any]:
     """Return one Runtime workflow summary."""
-    return _runtime(runtime_store_dir).workflow_summary(workflow_id)
+    return _runtime().workflow_summary(workflow_id)
 
 
-def list_workflows(*, runtime_store_dir: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_workflows() -> List[Dict[str, Any]]:
     """Return Runtime workflows ordered by update time."""
-    return _runtime(runtime_store_dir).list_workflows()
+    return _runtime().list_workflows()
 
 
 def _mpilot_subtitle_action(action: Dict[str, Any]) -> Dict[str, Any]:
@@ -380,6 +358,9 @@ def _mpilot_subtitle_action(action: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def create_mcp_server():
+    from mpilot.core.dotenv import load_project_dotenv
+
+    load_project_dotenv()
     try:
         from mcp.server.fastmcp import FastMCP
     except ModuleNotFoundError as error:
@@ -410,14 +391,13 @@ def main() -> int:
     return 0
 
 
-def _runtime(runtime_store_dir: Optional[str]) -> MediaWorkflowRuntime:
-    return MediaWorkflowRuntime(default_runtime_store_dir() if runtime_store_dir is None else runtime_store_dir)
+def _runtime() -> MediaWorkflowRuntime:
+    return MediaWorkflowRuntime(default_runtime_store_dir())
 
 
-def _job_store_dir(job_store_dir: Optional[str]) -> Optional[str]:
+def _job_store_dir() -> Optional[str]:
     return (
-        job_store_dir
-        or os.environ.get("MPILOT_SUBTITLE_JOB_STORE_DIR")
+        os.environ.get("MPILOT_SUBTITLE_JOB_STORE_DIR")
         or os.environ.get("BABELARR_JOB_STORE_DIR")
         or os.environ.get("MST_JOB_STORE_DIR")
     )

@@ -28,6 +28,26 @@ class JobNeedsConfirmation(RuntimeError):
         self.proposal = dict(proposal)
 
 
+def _read_job_file(path: Path, *, expected_job_id: str) -> Dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        _quarantine_corrupt_json(path)
+        raise JobStoreError("corrupt job state quarantined: %s" % expected_job_id) from error
+    if not isinstance(payload, dict) or payload.get("job_id") != expected_job_id:
+        _quarantine_corrupt_json(path)
+        raise JobStoreError("corrupt job state quarantined: %s" % expected_job_id)
+    return payload
+
+
+def _quarantine_corrupt_json(path: Path) -> None:
+    target = path.with_suffix(path.suffix + ".corrupt")
+    if target.exists():
+        target = path.with_suffix(path.suffix + ".corrupt-" + uuid.uuid4().hex)
+    with contextlib.suppress(OSError):
+        path.replace(target)
+
+
 def default_job_store_dir(
     env: Optional[Mapping[str, str]] = None,
     home: Optional[Path] = None,
@@ -85,7 +105,7 @@ class JobStore:
         path = self._path(job_id)
         if not path.exists():
             raise JobStoreError("job not found: %s" % job_id)
-        return json.loads(path.read_text(encoding="utf-8"))
+        return _read_job_file(path, expected_job_id=job_id)
 
     def save(self, job: Mapping[str, Any]) -> Dict[str, Any]:
         job_id = str(job.get("job_id") or "")
@@ -104,7 +124,10 @@ class JobStore:
             return []
         jobs = []
         for path in self.root.glob("*.json"):
-            job = json.loads(path.read_text(encoding="utf-8"))
+            try:
+                job = _read_job_file(path, expected_job_id=path.stem)
+            except JobStoreError:
+                continue
             if status and job.get("status") != status:
                 continue
             jobs.append(job)

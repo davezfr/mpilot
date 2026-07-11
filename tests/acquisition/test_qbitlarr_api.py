@@ -22,6 +22,13 @@ from mpilot.api.main import (
 from mpilot.acquisition.models import TorrentStatus
 
 
+@pytest.fixture(autouse=True)
+def allow_unauthenticated_loopback_for_api_tests(monkeypatch):
+    monkeypatch.setenv("MPILOT_ALLOW_UNAUTHENTICATED_LOOPBACK", "true")
+    monkeypatch.delenv("QBITLARR_REQUESTER_API_KEYS", raising=False)
+    monkeypatch.delenv("MPILOT_ACQUISITION_REQUESTER_API_KEYS", raising=False)
+
+
 def test_settings_defaults_public_save_paths(monkeypatch):
     monkeypatch.setenv("PROWLARR_URL", "http://prowlarr:9696")
     monkeypatch.delenv("PROWLARR_DOWNLOAD_URL", raising=False)
@@ -192,6 +199,24 @@ def test_start_cleanup_task_starts_loop_when_download_cleanup_is_disabled(monkey
 
     assert len(created) == 1
     assert app_main._cleanup_task is fake_task
+
+
+def test_app_lifespan_starts_and_stops_cleanup_task(monkeypatch):
+    events = []
+
+    async def fake_start_cleanup_task():
+        events.append("startup")
+
+    async def fake_stop_cleanup_task():
+        events.append("shutdown")
+
+    monkeypatch.setattr(app_main, "start_cleanup_task", fake_start_cleanup_task)
+    monkeypatch.setattr(app_main, "stop_cleanup_task", fake_stop_cleanup_task)
+
+    with TestClient(app_main.app):
+        assert events == ["startup"]
+
+    assert events == ["startup", "shutdown"]
 
 
 def test_cleanup_loop_runs_once_before_sleeping():
@@ -813,7 +838,7 @@ def test_download_endpoint_uses_query_context_to_keep_manual_selection_in_tv_pat
 
     QuerySnapshotStore(str(tmp_path)).create(
         query_id="query-tv-manual",
-        request={"input": "tt0017925", "query": "tt0017925"},
+        request={"input": "tt0017925", "query": "tt0017925", "requester_id": "telegram:123456789"},
         status="primary_ready",
         reason="primary_results_ready",
         results=[
@@ -925,6 +950,73 @@ def test_api_key_auth_blocks_requests_without_matching_header(monkeypatch):
     assert client.get("/health").status_code == 401
     assert client.get("/health", headers={"X-API-Key": "wrong"}).status_code == 401
     assert client.get("/health", headers={"X-API-Key": "secret-key"}).status_code == 200
+
+
+def test_api_key_auth_rejects_empty_key_by_default(monkeypatch):
+    monkeypatch.delenv("QBITLARR_API_KEY", raising=False)
+    monkeypatch.delenv("MPILOT_ACQUISITION_API_KEY", raising=False)
+    monkeypatch.delenv("MPILOT_ALLOW_UNAUTHENTICATED_LOOPBACK", raising=False)
+
+    client = TestClient(app)
+
+    response = client.get("/health")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "MPilot acquisition API key is required"
+
+
+def test_requester_api_key_binds_omitted_user_filter_to_authenticated_requester(monkeypatch):
+    import mpilot.api.downloads_list as downloads_api
+
+    seen = {}
+
+    async def fake_list_downloads(settings, requester_id=None):
+        seen["requester_id"] = requester_id
+        return []
+
+    monkeypatch.delenv("QBITLARR_API_KEY", raising=False)
+    monkeypatch.delenv("MPILOT_ACQUISITION_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "MPILOT_ACQUISITION_REQUESTER_API_KEYS",
+        json.dumps({"telegram:123": "requester-secret"}),
+    )
+    monkeypatch.setattr(downloads_api, "get_settings", lambda: object())
+    monkeypatch.setattr(downloads_api, "list_downloads_from_qbittorrent", fake_list_downloads)
+
+    response = TestClient(app).get("/downloads", headers={"X-API-Key": "requester-secret"})
+
+    assert response.status_code == 200
+    assert seen["requester_id"] == "telegram:123"
+
+
+def test_requester_api_key_rejects_spoofed_user_filter(monkeypatch):
+    import mpilot.api.downloads_list as downloads_api
+
+    monkeypatch.delenv("QBITLARR_API_KEY", raising=False)
+    monkeypatch.delenv("MPILOT_ACQUISITION_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "MPILOT_ACQUISITION_REQUESTER_API_KEYS",
+        json.dumps({"telegram:123": "requester-secret"}),
+    )
+    monkeypatch.setattr(downloads_api, "get_settings", lambda: object())
+
+    response = TestClient(app).get(
+        "/downloads?user_id=telegram:999",
+        headers={"X-API-Key": "requester-secret"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Requester identity does not match API key"
+
+
+def test_requester_api_key_cannot_equal_administrator_key(monkeypatch):
+    monkeypatch.setenv("MPILOT_ACQUISITION_API_KEY", "shared-secret")
+    monkeypatch.setenv("MPILOT_ACQUISITION_REQUESTER_API_KEYS", '{"telegram:123":"shared-secret"}')
+
+    response = TestClient(app).get("/health", headers={"X-API-Key": "shared-secret"})
+
+    assert response.status_code == 500
+    assert "must differ from the administrator API key" in response.json()["detail"]
 
 
 def test_deep_health_reports_dependency_status(monkeypatch):

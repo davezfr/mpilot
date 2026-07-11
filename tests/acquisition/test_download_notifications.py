@@ -4,6 +4,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from mpilot.acquisition.client import AcquisitionApiError
 from mpilot.mcp.acquisition_helpers import _maybe_register_completion_watch, _start_notifier_if_pending
 from mpilot.mcp.acquisition_notifications import (
@@ -1121,6 +1123,37 @@ def test_run_completion_hook_from_env_sends_json_payload(monkeypatch):
         "content_path": "/media/Movie.mkv",
         "info_hash": "abcdef",
     }
+
+
+def test_run_completion_hook_from_env_kills_timed_out_process(monkeypatch):
+    class FakeProcess:
+        killed = False
+        reaped = False
+
+        async def communicate(self, _payload):
+            await asyncio.Future()
+
+        def kill(self):
+            self.killed = True
+
+        async def wait(self):
+            self.reaped = True
+            return -9
+
+    process = FakeProcess()
+
+    async def fake_create_subprocess_exec(*_command, **_kwargs):
+        return process
+
+    monkeypatch.setenv("QBITLARR_COMPLETION_HOOK_COMMAND", "/bin/hook")
+    monkeypatch.setenv("QBITLARR_COMPLETION_HOOK_TIMEOUT_SECONDS", "0.001")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    with pytest.raises(RuntimeError, match="completion hook timed out after 0.001 seconds"):
+        asyncio.run(run_completion_hook_from_env({"info_hash": "abcdef"}))
+
+    assert process.killed is True
+    assert process.reaped is True
 
 
 def test_telegram_bot_token_prefers_hermes_profile_env(monkeypatch, tmp_path):

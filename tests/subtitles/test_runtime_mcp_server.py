@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import sys
 import tempfile
 import types
@@ -23,6 +24,10 @@ class FakeFastMCP:
             return func
 
         return decorator
+
+
+def runtime_store_env(store_dir):
+    return patch.dict("os.environ", {"MPILOT_RUNTIME_STORE_DIR": str(store_dir)}, clear=False)
 
 
 class RuntimeMcpServerTests(unittest.TestCase):
@@ -57,79 +62,99 @@ class RuntimeMcpServerTests(unittest.TestCase):
             ],
         )
 
+    def test_runtime_mcp_tools_do_not_expose_store_dir_arguments(self):
+        for tool in (
+            mcp_server.record_acquisition_download,
+            mcp_server.record_acquisition_download_with_subtitle_intent,
+            mcp_server.attach_subtitle_intent,
+            mcp_server.record_local_video_subtitle_intent,
+            mcp_server.claim_ready_subtitle_job_create_video_actions,
+            mcp_server.record_subtitle_job_created,
+            mcp_server.record_subtitle_job_status,
+            mcp_server.queue_status,
+            mcp_server.workflow_show,
+            mcp_server.list_workflows,
+        ):
+            with self.subTest(tool=tool.__name__):
+                self.assertNotIn("runtime_store_dir", inspect.signature(tool).parameters)
+                self.assertNotIn("job_store_dir", inspect.signature(tool).parameters)
+
     def test_runtime_tools_share_runtime_store(self):
         with tempfile.TemporaryDirectory() as tmp:
             store_dir = str(Path(tmp))
-            mcp_server.record_qbitlarr_download(
-                runtime_store_dir=store_dir,
-                requester_id="telegram:123",
-                info_hash="abc123",
-                title="Example Movie",
-                imdb_id="tt1234567",
-                media_type="movie",
-                progress=1.0,
-                content_path="/mnt/media/Movies/Example.Movie.mkv",
-            )
-            attached = mcp_server.attach_subtitle_intent(
-                runtime_store_dir=store_dir,
-                requester_id="telegram:123",
-                source_language="en",
-                target_language="zh",
-                output_mode="bilingual-ass",
-                notification_language="en",
-            )
-            task_id = attached["tasks"][1]["task_id"]
-            workflow_id = attached["workflow_id"]
+            with runtime_store_env(store_dir):
+                mcp_server.record_qbitlarr_download(
+                    requester_id="telegram:123",
+                    info_hash="abc123",
+                    title="Example Movie",
+                    imdb_id="tt1234567",
+                    media_type="movie",
+                    progress=1.0,
+                    content_path="/mnt/media/Movies/Example.Movie.mkv",
+                )
+                attached = mcp_server.attach_subtitle_intent(
+                    requester_id="telegram:123",
+                    source_language="en",
+                    target_language="zh",
+                    output_mode="bilingual-ass",
+                    notification_language="en",
+                    notification_target="telegram:456",
+                )
+                task_id = attached["tasks"][1]["task_id"]
+                workflow_id = attached["workflow_id"]
 
-            actions = mcp_server.claim_ready_subtitle_job_create_video_actions(runtime_store_dir=store_dir)
-            self.assertEqual(len(actions), 1)
-            self.assertEqual(actions[0]["action"], "subtitle_job_create_video")
+                actions = mcp_server.claim_ready_subtitle_job_create_video_actions()
+                self.assertEqual(len(actions), 1)
+                self.assertEqual(actions[0]["action"], "subtitle_job_create_video")
 
-            mcp_server.record_subtitle_job_created(
-                runtime_store_dir=store_dir,
-                workflow_id=workflow_id,
-                task_id=task_id,
-                subtitle_job_id="job_123",
-            )
-            summary = mcp_server.workflow_show(runtime_store_dir=store_dir, workflow_id=workflow_id)
+                mcp_server.record_subtitle_job_created(
+                    workflow_id=workflow_id,
+                    task_id=task_id,
+                    subtitle_job_id="job_123",
+                )
+                summary = mcp_server.workflow_show(workflow_id=workflow_id)
 
             self.assertEqual(summary["tasks"][1]["babelarr"]["job_id"], "job_123")
 
     def test_combined_runtime_tool_records_download_and_subtitle_intent(self):
         with tempfile.TemporaryDirectory() as tmp:
-            workflow = mcp_server.record_qbitlarr_download_with_subtitle_intent(
-                runtime_store_dir=str(Path(tmp)),
-                requester_id="telegram:123",
-                info_hash="abc123",
-                title="Example Movie",
-                source_language="en",
-                target_language="zh",
-                output_mode="bilingual-ass",
-                notification_language="en",
-            )
+            with runtime_store_env(Path(tmp)):
+                workflow = mcp_server.record_qbitlarr_download_with_subtitle_intent(
+                    requester_id="telegram:123",
+                    info_hash="abc123",
+                    title="Example Movie",
+                    source_language="en",
+                    target_language="zh",
+                    output_mode="bilingual-ass",
+                    notification_language="en",
+                    notification_target="telegram:456",
+                )
 
             self.assertEqual([task["task_type"] for task in workflow["tasks"]], ["download_media", "translate_subtitle"])
             self.assertEqual(workflow["tasks"][1]["status"], "waiting_for_dependency")
             self.assertEqual(workflow["tasks"][1]["subtitle"]["notification_language"], "en")
+            self.assertEqual(workflow["notification_target"], "telegram:456")
 
     def test_local_video_subtitle_intent_tool_records_ready_queue_item(self):
         with tempfile.TemporaryDirectory() as tmp:
             store_dir = str(Path(tmp))
-            workflow = mcp_server.record_local_video_subtitle_intent(
-                runtime_store_dir=store_dir,
-                requester_id="telegram:123",
-                video_path="/mnt/media/Movies/Example.Movie.mkv",
-                title="Example Movie",
-                source_language="en",
-                target_language="zh",
-                output_mode="bilingual-ass",
-                notification_language="en",
-            )
-            status = mcp_server.queue_status(runtime_store_dir=store_dir, requester_id="telegram:123")
+            with runtime_store_env(store_dir):
+                workflow = mcp_server.record_local_video_subtitle_intent(
+                    requester_id="telegram:123",
+                    video_path="/mnt/media/Movies/Example.Movie.mkv",
+                    title="Example Movie",
+                    source_language="en",
+                    target_language="zh",
+                    output_mode="bilingual-ass",
+                    notification_language="en",
+                    notification_target="telegram:456",
+                )
+                status = mcp_server.queue_status(requester_id="telegram:123")
 
             self.assertEqual([task["task_type"] for task in workflow["tasks"]], ["translate_subtitle"])
             self.assertEqual(workflow["tasks"][0]["status"], "ready")
             self.assertEqual(workflow["tasks"][0]["subtitle"]["notification_language"], "en")
+            self.assertEqual(workflow["notification_target"], "telegram:456")
             self.assertEqual(status["global"]["ready_count"], 1)
             self.assertEqual(status["requester_tasks"][0]["queue_position"], 1)
 
@@ -151,26 +176,25 @@ class RuntimeMcpServerTests(unittest.TestCase):
                 {"input": "/mnt/media/Movies/Example.Movie.mkv", "output": "/mnt/media/Movies/Example.Movie.zh.ass"},
                 now="2026-06-22T13:20:00Z",
             )
-            workflow = mcp_server.record_local_video_subtitle_intent(
-                runtime_store_dir=runtime_tmp,
-                requester_id="telegram:123",
-                video_path="/mnt/media/Movies/Example.Movie.mkv",
-                title="Example Movie",
-                source_language="en",
-                target_language="zh",
-                output_mode="bilingual-ass",
-            )
-            task_id = workflow["tasks"][0]["task_id"]
-            mcp_server.record_subtitle_job_created(
-                runtime_store_dir=runtime_tmp,
-                workflow_id=workflow["workflow_id"],
-                task_id=task_id,
-                subtitle_job_id=job["job_id"],
-            )
+            with runtime_store_env(runtime_tmp):
+                workflow = mcp_server.record_local_video_subtitle_intent(
+                    requester_id="telegram:123",
+                    video_path="/mnt/media/Movies/Example.Movie.mkv",
+                    title="Example Movie",
+                    source_language="en",
+                    target_language="zh",
+                    output_mode="bilingual-ass",
+                )
+                task_id = workflow["tasks"][0]["task_id"]
+                mcp_server.record_subtitle_job_created(
+                    workflow_id=workflow["workflow_id"],
+                    task_id=task_id,
+                    subtitle_job_id=job["job_id"],
+                )
 
-            with patch.dict("os.environ", {"MPILOT_SUBTITLE_JOB_STORE_DIR": jobs_tmp}, clear=False):
-                status = mcp_server.queue_status(runtime_store_dir=runtime_tmp, requester_id="telegram:123")
-                workflow = mcp_server.workflow_show(runtime_store_dir=runtime_tmp, workflow_id=workflow["workflow_id"])
+                with patch.dict("os.environ", {"MPILOT_SUBTITLE_JOB_STORE_DIR": jobs_tmp}, clear=False):
+                    status = mcp_server.queue_status(requester_id="telegram:123")
+                    workflow = mcp_server.workflow_show(workflow_id=workflow["workflow_id"])
 
             self.assertEqual(status["global"]["active_count"], 0)
             self.assertEqual(status["global"]["total_open_count"], 0)
@@ -197,36 +221,34 @@ class RuntimeMcpServerTests(unittest.TestCase):
                 {"input": "/mnt/media/TV/Show.S09E03.mkv", "output": "/mnt/media/TV/Show.S09E03.zh.ass"},
                 now="2026-06-22T13:20:00Z",
             )
-            first = mcp_server.record_local_video_subtitle_intent(
-                runtime_store_dir=runtime_tmp,
-                requester_id="telegram:123",
-                video_path="/mnt/media/TV/Show.S09E03.mkv",
-                title="Show S09E03",
-                source_language="en",
-                target_language="zh",
-                output_mode="bilingual-ass",
-            )
-            first_task_id = first["tasks"][0]["task_id"]
-            mcp_server.claim_ready_subtitle_job_create_video_actions(runtime_store_dir=runtime_tmp)
-            mcp_server.record_subtitle_job_created(
-                runtime_store_dir=runtime_tmp,
-                workflow_id=first["workflow_id"],
-                task_id=first_task_id,
-                subtitle_job_id=first_job["job_id"],
-            )
-            second = mcp_server.record_local_video_subtitle_intent(
-                runtime_store_dir=runtime_tmp,
-                requester_id="telegram:123",
-                video_path="/mnt/media/TV/Show.S09E04.mkv",
-                title="Show S09E04",
-                source_language="en",
-                target_language="zh",
-                output_mode="bilingual-ass",
-            )
+            with runtime_store_env(runtime_tmp):
+                first = mcp_server.record_local_video_subtitle_intent(
+                    requester_id="telegram:123",
+                    video_path="/mnt/media/TV/Show.S09E03.mkv",
+                    title="Show S09E03",
+                    source_language="en",
+                    target_language="zh",
+                    output_mode="bilingual-ass",
+                )
+                first_task_id = first["tasks"][0]["task_id"]
+                mcp_server.claim_ready_subtitle_job_create_video_actions()
+                mcp_server.record_subtitle_job_created(
+                    workflow_id=first["workflow_id"],
+                    task_id=first_task_id,
+                    subtitle_job_id=first_job["job_id"],
+                )
+                second = mcp_server.record_local_video_subtitle_intent(
+                    requester_id="telegram:123",
+                    video_path="/mnt/media/TV/Show.S09E04.mkv",
+                    title="Show S09E04",
+                    source_language="en",
+                    target_language="zh",
+                    output_mode="bilingual-ass",
+                )
 
-            with patch.dict("os.environ", {"MPILOT_SUBTITLE_JOB_STORE_DIR": jobs_tmp}, clear=False):
-                actions = mcp_server.claim_ready_subtitle_job_create_video_actions(runtime_store_dir=runtime_tmp)
-                first_summary = mcp_server.workflow_show(runtime_store_dir=runtime_tmp, workflow_id=first["workflow_id"])
+                with patch.dict("os.environ", {"MPILOT_SUBTITLE_JOB_STORE_DIR": jobs_tmp}, clear=False):
+                    actions = mcp_server.claim_ready_subtitle_job_create_video_actions()
+                    first_summary = mcp_server.workflow_show(workflow_id=first["workflow_id"])
 
             self.assertEqual(len(actions), 1)
             self.assertEqual(actions[0]["action"], "subtitle_job_create_video")
@@ -236,26 +258,26 @@ class RuntimeMcpServerTests(unittest.TestCase):
 
     def test_runtime_tools_reject_invalid_output_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(RuntimeStoreError):
-                mcp_server.record_qbitlarr_download_with_subtitle_intent(
-                    runtime_store_dir=str(Path(tmp)),
-                    requester_id="telegram:123",
-                    info_hash="abc123",
-                    source_language="en",
-                    target_language="zh",
-                    output_mode="invalid-mode",
-                )
+            with runtime_store_env(Path(tmp)):
+                with self.assertRaises(RuntimeStoreError):
+                    mcp_server.record_qbitlarr_download_with_subtitle_intent(
+                        requester_id="telegram:123",
+                        info_hash="abc123",
+                        source_language="en",
+                        target_language="zh",
+                        output_mode="invalid-mode",
+                    )
 
     def test_record_local_video_subtitle_intent_maps_container_path_via_env(self):
         with tempfile.TemporaryDirectory() as tmp:
             store_dir = str(Path(tmp))
             env = {
+                "MPILOT_RUNTIME_STORE_DIR": store_dir,
                 "MWR_CONTENT_PATH_PREFIX": "/media",
                 "MWR_LOCAL_CONTENT_PATH_PREFIX": "/mnt/media",
             }
             with patch.dict("os.environ", env, clear=False):
                 workflow = mcp_server.record_local_video_subtitle_intent(
-                    runtime_store_dir=store_dir,
                     requester_id="telegram:123",
                     video_path="/media/Movies - HD/Toy Story 2 (1999) [1080p]",
                     title="Toy Story 2",
@@ -273,12 +295,12 @@ class RuntimeMcpServerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store_dir = str(Path(tmp))
             env = {
+                "MPILOT_RUNTIME_STORE_DIR": store_dir,
                 "MWR_CONTENT_PATH_PREFIX": "/media",
                 "MWR_LOCAL_CONTENT_PATH_PREFIX": "/mnt/media",
             }
             with patch.dict("os.environ", env, clear=False):
                 workflow = mcp_server.record_qbitlarr_download(
-                    runtime_store_dir=store_dir,
                     requester_id="telegram:123",
                     info_hash="abc123",
                     title="Toy Story 2",

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import fcntl
 import inspect
 import json
 import logging
@@ -18,7 +17,6 @@ from mpilot.acquisition.client import AcquisitionApiClient, AcquisitionApiError,
 from mpilot.acquisition.domain.download_progress import (
     dynamic_progress_watch_policy,
     render_download_status_payload,
-    render_download_status,
     render_tracking_expired_status,
 )
 from mpilot.acquisition.env import env_first as acquisition_env_first
@@ -649,11 +647,36 @@ async def run_completion_hook_from_env(event: dict[str, Any]) -> None:
         *command,
         **kwargs,
     )
-    stdout, stderr = await proc.communicate(payload)
+    timeout_seconds = _completion_hook_timeout_seconds()
+    communicate_task = asyncio.create_task(proc.communicate(payload))
+    try:
+        stdout, stderr = await asyncio.wait_for(communicate_task, timeout=timeout_seconds)
+    except TimeoutError as exc:
+        communicate_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await communicate_task
+        with contextlib.suppress(Exception):
+            proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+        raise RuntimeError(f"completion hook timed out after {timeout_seconds:g} seconds") from exc
     if proc.returncode != 0:
         detail = (stderr or stdout).decode("utf-8", errors="replace").strip()
         suffix = ": %s" % detail if detail else ""
         raise RuntimeError("completion hook failed with exit code %s%s" % (proc.returncode, suffix))
+
+
+def _completion_hook_timeout_seconds() -> float:
+    raw_value = (
+        acquisition_env_first("QBITLARR_COMPLETION_HOOK_TIMEOUT_SECONDS", default="120") or "120"
+    ).strip()
+    try:
+        timeout_seconds = float(raw_value)
+    except ValueError as exc:
+        raise RuntimeError("completion hook timeout must be a positive number") from exc
+    if timeout_seconds <= 0:
+        raise RuntimeError("completion hook timeout must be a positive number")
+    return timeout_seconds
 
 
 def _completion_hook_env() -> dict[str, str] | None:

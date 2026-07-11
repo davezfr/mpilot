@@ -59,10 +59,6 @@ def plex_search(
     season: Optional[int] = None,
     episode: Optional[int] = None,
     limit: int = 10,
-    plex_base_url: Optional[str] = None,
-    plex_token: Optional[str] = None,
-    plex_path_prefix: Optional[str] = None,
-    local_path_prefix: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Search Plex/local library by title and return local media candidates.
 
@@ -76,13 +72,6 @@ def plex_search(
     _append_value(argv, "--season", season)
     _append_value(argv, "--episode", episode)
     _append_value(argv, "--limit", limit)
-    _append_plex_connection(
-        argv,
-        plex_base_url=plex_base_url,
-        plex_token=plex_token,
-        plex_path_prefix=plex_path_prefix,
-        local_path_prefix=local_path_prefix,
-    )
     return run_cli_summary(argv)
 
 
@@ -94,27 +83,16 @@ def subtitle_plan(
     episode: Optional[int] = None,
     target_language: str,
     preferred_source_language: str = "en",
-    plex_base_url: Optional[str] = None,
-    plex_token: Optional[str] = None,
-    plex_path_prefix: Optional[str] = None,
-    local_path_prefix: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Plan local subtitle availability for one Plex movie or episode.
 
     Use this before creating a translation job when the user is asking whether
     a target-language subtitle already exists or whether translation is needed.
-    Pass exactly one of imdb or rating_key. Plex credentials can be supplied as
-    arguments or through PLEX_BASE_URL and PLEX_TOKEN.
+    Pass exactly one of imdb or rating_key. Plex connection settings are fixed
+    by the MCP server process environment.
     """
     argv = ["subtitle-plan"]
     _append_resource(argv, imdb=imdb, rating_key=rating_key, season=season, episode=episode)
-    _append_plex_connection(
-        argv,
-        plex_base_url=plex_base_url,
-        plex_token=plex_token,
-        plex_path_prefix=plex_path_prefix,
-        local_path_prefix=local_path_prefix,
-    )
     _append_value(argv, "--target-language", target_language)
     _append_value(argv, "--preferred-source-language", preferred_source_language)
     return run_cli_summary(argv)
@@ -131,9 +109,6 @@ def job_create(
     output_mode: Optional[str] = None,
     backend: Optional[str] = None,
     model: Optional[str] = None,
-    plex_base_url: Optional[str] = None,
-    plex_path_prefix: Optional[str] = None,
-    local_path_prefix: Optional[str] = None,
     output: Optional[str] = None,
     force: bool = False,
     work_dir: Optional[str] = None,
@@ -150,7 +125,6 @@ def job_create(
     primary_script: Optional[str] = None,
     secondary_script: Optional[str] = None,
     ass_height: Optional[int] = None,
-    job_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a persistent translate-plex job.
 
@@ -160,11 +134,7 @@ def job_create(
     the worker environment.
     """
     argv = ["job-create"]
-    _append_value(argv, "--job-store-dir", job_store_dir)
     _append_resource(argv, imdb=imdb, rating_key=rating_key, season=season, episode=episode)
-    _append_value(argv, "--plex-base-url", plex_base_url)
-    _append_value(argv, "--plex-path-prefix", plex_path_prefix)
-    _append_value(argv, "--local-path-prefix", local_path_prefix)
     _append_value(argv, "--source-language", source_language)
     _append_value(argv, "--target-language", target_language)
     _append_value(argv, "--backend", backend)
@@ -189,10 +159,9 @@ def job_create(
     return run_cli_summary(argv)
 
 
-def job_show(job_id: str, *, job_store_dir: Optional[str] = None) -> Dict[str, Any]:
+def job_show(job_id: str) -> Dict[str, Any]:
     """Return one persistent job record by ID."""
     argv = ["job-show"]
-    _append_value(argv, "--job-store-dir", job_store_dir)
     argv.append(job_id)
     return run_cli_summary(argv)
 
@@ -200,54 +169,51 @@ def job_show(job_id: str, *, job_store_dir: Optional[str] = None) -> Dict[str, A
 def job_run(
     job_id: str,
     *,
-    job_store_dir: Optional[str] = None,
-    plex_base_url: Optional[str] = None,
-    plex_token: Optional[str] = None,
-    plex_path_prefix: Optional[str] = None,
-    local_path_prefix: Optional[str] = None,
-    openai_base_url: Optional[str] = None,
-    openai_api_key: Optional[str] = None,
     allow_low_confidence_subtitle: bool = False,
     allow_provider_fallback_language: bool = False,
-    opensubtitles_api_key: Optional[str] = None,
-    opensubtitles_user_agent: Optional[str] = None,
-    opensubtitles_username: Optional[str] = None,
-    opensubtitles_password: Optional[str] = None,
-    opensubtitles_token: Optional[str] = None,
-    subdl_api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run or retry one persistent subtitle translation job.
 
-    Use this after job_create. Runtime-only secrets such as PLEX_TOKEN,
-    OpenSubtitles credentials, SubDL API key, and OpenAI-compatible settings can
-    be supplied as arguments or through the worker environment. This call is
-    synchronous and may exceed chat/MCP timeouts; use job_start for Telegram or
-    other user-facing flows that need immediate feedback.
+    Use this after job_create. Runtime-only connection settings and credentials
+    are fixed by the MCP server process environment. This call is synchronous
+    and may exceed chat/MCP timeouts; use job_start for Telegram or other
+    user-facing flows that need immediate feedback.
     """
-    argv = _job_runtime_argv("job-run")
-    _append_job_runtime(
-        argv,
-        job_store_dir=job_store_dir,
-        plex_base_url=plex_base_url,
-        plex_token=plex_token,
-        plex_path_prefix=plex_path_prefix,
-        local_path_prefix=local_path_prefix,
-        openai_base_url=openai_base_url,
-        openai_api_key=openai_api_key,
-        allow_low_confidence_subtitle=allow_low_confidence_subtitle,
-        allow_provider_fallback_language=allow_provider_fallback_language,
-        opensubtitles_api_key=opensubtitles_api_key,
-        opensubtitles_user_agent=opensubtitles_user_agent,
-        opensubtitles_username=opensubtitles_username,
-        opensubtitles_password=opensubtitles_password,
-        opensubtitles_token=opensubtitles_token,
-        subdl_api_key=subdl_api_key,
-    )
+    argv = ["job-run"]
+    _append_flag(argv, "--allow-low-confidence-subtitle", allow_low_confidence_subtitle)
+    _append_flag(argv, "--allow-provider-fallback-language", allow_provider_fallback_language)
     argv.append(job_id)
     return run_cli_summary(argv)
 
 
 def job_start(
+    job_id: str,
+    *,
+    allow_low_confidence_subtitle: bool = False,
+    allow_provider_fallback_language: bool = False,
+    notification_target: Optional[str] = None,
+    requester_id: Optional[str] = None,
+    title: Optional[str] = None,
+    notification_language: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Start one persistent subtitle translation job in the background.
+
+    Connection settings, credentials, job stores, and Runtime mirror paths are
+    fixed by the MCP server process. Operator-level overrides remain available
+    through the CLI and the private Runtime dispatcher adapter.
+    """
+    return _job_start_with_overrides(
+        job_id,
+        allow_low_confidence_subtitle=allow_low_confidence_subtitle,
+        allow_provider_fallback_language=allow_provider_fallback_language,
+        notification_target=notification_target,
+        requester_id=requester_id,
+        title=title,
+        notification_language=notification_language,
+    )
+
+
+def _job_start_with_overrides(
     job_id: str,
     *,
     job_store_dir: Optional[str] = None,
@@ -273,16 +239,6 @@ def job_start(
     runtime_workflow_id: Optional[str] = None,
     runtime_task_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Start one persistent subtitle translation job in the background.
-
-    Use this after job_create for Telegram or other chat workflows. It returns
-    immediately with the job id and worker pid so the Bot can tell the user that
-    processing has started, then call job_show later for status. Runtime-only
-    secrets are passed to the worker environment, not stored in the job record.
-    Pass notification_target or requester_id as a Hermes send target such as
-    "telegram:<chat-id>" to send running status updates plus one terminal
-    status notice.
-    """
     argv = _job_runtime_argv("job-start")
     _append_job_runtime(
         argv,
@@ -317,19 +273,6 @@ def job_resume(
     *,
     stale_after_seconds: int = 3600,
     limit: int = 10,
-    job_store_dir: Optional[str] = None,
-    plex_base_url: Optional[str] = None,
-    plex_token: Optional[str] = None,
-    plex_path_prefix: Optional[str] = None,
-    local_path_prefix: Optional[str] = None,
-    openai_base_url: Optional[str] = None,
-    openai_api_key: Optional[str] = None,
-    opensubtitles_api_key: Optional[str] = None,
-    opensubtitles_user_agent: Optional[str] = None,
-    opensubtitles_username: Optional[str] = None,
-    opensubtitles_password: Optional[str] = None,
-    opensubtitles_token: Optional[str] = None,
-    subdl_api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run recoverable queued, failed, or stale-running jobs.
 
@@ -338,23 +281,6 @@ def job_resume(
     job_confirm_low_confidence for the specific job after user approval.
     """
     argv = ["job-resume"]
-    _append_job_runtime(
-        argv,
-        job_store_dir=job_store_dir,
-        plex_base_url=plex_base_url,
-        plex_token=plex_token,
-        plex_path_prefix=plex_path_prefix,
-        local_path_prefix=local_path_prefix,
-        openai_base_url=openai_base_url,
-        openai_api_key=openai_api_key,
-        allow_low_confidence_subtitle=False,
-        opensubtitles_api_key=opensubtitles_api_key,
-        opensubtitles_user_agent=opensubtitles_user_agent,
-        opensubtitles_username=opensubtitles_username,
-        opensubtitles_password=opensubtitles_password,
-        opensubtitles_token=opensubtitles_token,
-        subdl_api_key=subdl_api_key,
-    )
     _append_value(argv, "--stale-after-seconds", stale_after_seconds)
     _append_value(argv, "--limit", limit)
     return run_cli_summary(argv)
@@ -363,19 +289,6 @@ def job_resume(
 def job_confirm_low_confidence(
     job_id: str,
     *,
-    job_store_dir: Optional[str] = None,
-    plex_base_url: Optional[str] = None,
-    plex_token: Optional[str] = None,
-    plex_path_prefix: Optional[str] = None,
-    local_path_prefix: Optional[str] = None,
-    openai_base_url: Optional[str] = None,
-    openai_api_key: Optional[str] = None,
-    opensubtitles_api_key: Optional[str] = None,
-    opensubtitles_user_agent: Optional[str] = None,
-    opensubtitles_username: Optional[str] = None,
-    opensubtitles_password: Optional[str] = None,
-    opensubtitles_token: Optional[str] = None,
-    subdl_api_key: Optional[str] = None,
     notification_target: Optional[str] = None,
     requester_id: Optional[str] = None,
     title: Optional[str] = None,
@@ -389,20 +302,7 @@ def job_confirm_low_confidence(
     """
     return job_start(
         job_id,
-        job_store_dir=job_store_dir,
-        plex_base_url=plex_base_url,
-        plex_token=plex_token,
-        plex_path_prefix=plex_path_prefix,
-        local_path_prefix=local_path_prefix,
-        openai_base_url=openai_base_url,
-        openai_api_key=openai_api_key,
         allow_low_confidence_subtitle=True,
-        opensubtitles_api_key=opensubtitles_api_key,
-        opensubtitles_user_agent=opensubtitles_user_agent,
-        opensubtitles_username=opensubtitles_username,
-        opensubtitles_password=opensubtitles_password,
-        opensubtitles_token=opensubtitles_token,
-        subdl_api_key=subdl_api_key,
         notification_target=notification_target,
         requester_id=requester_id,
         title=title,
@@ -413,19 +313,6 @@ def job_confirm_low_confidence(
 def job_confirm_provider_fallback_language(
     job_id: str,
     *,
-    job_store_dir: Optional[str] = None,
-    plex_base_url: Optional[str] = None,
-    plex_token: Optional[str] = None,
-    plex_path_prefix: Optional[str] = None,
-    local_path_prefix: Optional[str] = None,
-    openai_base_url: Optional[str] = None,
-    openai_api_key: Optional[str] = None,
-    opensubtitles_api_key: Optional[str] = None,
-    opensubtitles_user_agent: Optional[str] = None,
-    opensubtitles_username: Optional[str] = None,
-    opensubtitles_password: Optional[str] = None,
-    opensubtitles_token: Optional[str] = None,
-    subdl_api_key: Optional[str] = None,
     notification_target: Optional[str] = None,
     requester_id: Optional[str] = None,
     title: Optional[str] = None,
@@ -441,20 +328,7 @@ def job_confirm_provider_fallback_language(
     """
     return job_start(
         job_id,
-        job_store_dir=job_store_dir,
-        plex_base_url=plex_base_url,
-        plex_token=plex_token,
-        plex_path_prefix=plex_path_prefix,
-        local_path_prefix=local_path_prefix,
-        openai_base_url=openai_base_url,
-        openai_api_key=openai_api_key,
         allow_provider_fallback_language=True,
-        opensubtitles_api_key=opensubtitles_api_key,
-        opensubtitles_user_agent=opensubtitles_user_agent,
-        opensubtitles_username=opensubtitles_username,
-        opensubtitles_password=opensubtitles_password,
-        opensubtitles_token=opensubtitles_token,
-        subdl_api_key=subdl_api_key,
         notification_target=notification_target,
         requester_id=requester_id,
         title=title,
@@ -462,7 +336,7 @@ def job_confirm_provider_fallback_language(
     )
 
 
-def job_create_video(
+def _job_create_video_with_store(
     video_path: str,
     *,
     imdb_id: Optional[str] = None,
@@ -528,21 +402,80 @@ def job_create_video(
     return run_cli_summary(argv)
 
 
+def job_create_video(
+    video_path: str,
+    *,
+    imdb_id: Optional[str] = None,
+    title: Optional[str] = None,
+    media_type: Optional[str] = None,
+    season: Optional[int] = None,
+    episode: Optional[int] = None,
+    source_language: Optional[str] = None,
+    target_language: Optional[str] = None,
+    output_mode: Optional[str] = None,
+    backend: Optional[str] = None,
+    model: Optional[str] = None,
+    output: Optional[str] = None,
+    force: bool = False,
+    work_dir: Optional[str] = None,
+    keep_work_dir: bool = False,
+    no_online_subtitle_fallback: bool = False,
+    allow_low_confidence_subtitle: bool = False,
+    allow_provider_fallback_language: bool = False,
+    assume_unlabeled_stream_language: bool = False,
+    subtitle_provider: Optional[str] = None,
+    provider_search_limit: Optional[int] = None,
+    download_provider_priority: Optional[str] = None,
+    primary_script: Optional[str] = None,
+    secondary_script: Optional[str] = None,
+    ass_height: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Create a persistent translate-video job in the configured job store."""
+    return _job_create_video_with_store(
+        video_path,
+        imdb_id=imdb_id,
+        title=title,
+        media_type=media_type,
+        season=season,
+        episode=episode,
+        source_language=source_language,
+        target_language=target_language,
+        output_mode=output_mode,
+        backend=backend,
+        model=model,
+        output=output,
+        force=force,
+        work_dir=work_dir,
+        keep_work_dir=keep_work_dir,
+        no_online_subtitle_fallback=no_online_subtitle_fallback,
+        allow_low_confidence_subtitle=allow_low_confidence_subtitle,
+        allow_provider_fallback_language=allow_provider_fallback_language,
+        assume_unlabeled_stream_language=assume_unlabeled_stream_language,
+        subtitle_provider=subtitle_provider,
+        provider_search_limit=provider_search_limit,
+        download_provider_priority=download_provider_priority,
+        primary_script=primary_script,
+        secondary_script=secondary_script,
+        ass_height=ass_height,
+    )
+
+
 def job_prune(
     *,
     retention_days: int = 90,
     dry_run: bool = False,
-    job_store_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Delete old succeeded job records from the local job store."""
     argv = ["job-prune"]
-    _append_value(argv, "--job-store-dir", job_store_dir)
     _append_value(argv, "--retention-days", retention_days)
     _append_flag(argv, "--dry-run", dry_run)
     return run_cli_summary(argv)
 
 
 def create_mcp_server():
+    from mpilot.core.dotenv import load_project_dotenv
+
+    load_project_dotenv()
     try:
         from mcp.server.fastmcp import FastMCP
     except ModuleNotFoundError as error:

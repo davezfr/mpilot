@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import Sequence
 
+from mpilot.core.dotenv import load_project_dotenv
+
 from . import run_daemon
 
 
@@ -30,6 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    load_project_dotenv()
     logging.basicConfig(level=logging.INFO)
     args = build_parser().parse_args(argv)
     payload = run_daemon(
@@ -45,7 +48,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
     if payload.get("status") == "already_running":
         return 2
-    return 0 if payload.get("status") != "error" else 1
+    return 0 if payload.get("status") == "ok" else 1
 
 
 if __name__ == "__main__":

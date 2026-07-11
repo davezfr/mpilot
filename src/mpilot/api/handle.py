@@ -5,8 +5,9 @@ import logging
 import re
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
+from mpilot.api.auth import bind_requester
 from mpilot.acquisition.config import Settings, get_settings
 from mpilot.acquisition.domain.quality import (
     DEFAULT_QUALITY_PREFERENCES,
@@ -99,9 +100,12 @@ MOVIE_CANDIDATE_LIMIT = 5
     ),
     tags=["acquisition"],
 )
-async def handle(request: HandleRequest, background_tasks: BackgroundTasks) -> HandleResponse:
+async def handle(request: HandleRequest, background_tasks: BackgroundTasks, http_request: Request) -> HandleResponse:
     """Search movie or TV requests and either auto-download or return ranked choices."""
     try:
+        effective_user_id = bind_requester(http_request, request.user_id)
+        if effective_user_id != request.user_id:
+            request = request.model_copy(update={"user_id": effective_user_id})
         settings = get_settings()
         user_message = normalize_user_message(request.user_message)
         imdb_id = extract_imdb_id(user_message)
@@ -159,6 +163,7 @@ async def handle(request: HandleRequest, background_tasks: BackgroundTasks) -> H
                 settings=settings,
                 message=EXTERNAL_ID_UNRESOLVED_MESSAGE,
                 snapshot_status="external_id_unresolved",
+                requester_id=request.user_id,
             )
 
         logger.info("Handling keyword request for user_id=%s", request.user_id or "anonymous")
@@ -173,6 +178,7 @@ async def handle(request: HandleRequest, background_tasks: BackgroundTasks) -> H
                 settings=settings,
                 message=KEYWORD_UNRESOLVED_MESSAGE,
                 snapshot_status="keyword_unresolved",
+                requester_id=request.user_id,
             )
 
         if len(candidates) == 1:
@@ -205,6 +211,7 @@ async def handle(request: HandleRequest, background_tasks: BackgroundTasks) -> H
             store=store,
             user_message=user_message,
             settings=settings,
+            requester_id=request.user_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -262,7 +269,12 @@ async def _handle_imdb_request(
         )
         store.create(
             query_id=query_id,
-            request=_snapshot_request_payload(user_message=user_message, search_request=base_request, settings=settings),
+            request=_snapshot_request_payload(
+                user_message=user_message,
+                search_request=base_request,
+                settings=settings,
+                requester_id=requester_id,
+            ),
             status="already_in_qbittorrent",
             reason="matching_download_exists",
             results=primary_ranked,
@@ -328,7 +340,12 @@ async def _handle_imdb_request(
 
     store.create(
         query_id=query_id,
-        request=_snapshot_request_payload(user_message=user_message, search_request=base_request, settings=settings),
+        request=_snapshot_request_payload(
+            user_message=user_message,
+            search_request=base_request,
+            settings=settings,
+            requester_id=requester_id,
+        ),
         status=snapshot_status,
         reason="primary_results_ready" if primary_ranked else "primary_no_results",
         results=primary_ranked,
@@ -786,11 +803,17 @@ def _needs_imdb_response(
     settings: Settings,
     message: str,
     snapshot_status: str,
+    requester_id: str | None,
 ) -> HandleResponse:
     base_request = SearchRequest(query=user_message, categories=get_categories(user_message))
     store.create(
         query_id=query_id,
-        request=_snapshot_request_payload(user_message=user_message, search_request=base_request, settings=settings),
+        request=_snapshot_request_payload(
+            user_message=user_message,
+            search_request=base_request,
+            settings=settings,
+            requester_id=requester_id,
+        ),
         status=snapshot_status,
         reason=snapshot_status,
         results=[],
@@ -812,6 +835,7 @@ def _choose_title_response(
     store: QuerySnapshotStore,
     user_message: str,
     settings: Settings,
+    requester_id: str | None,
 ) -> HandleResponse:
     base_request = SearchRequest(query=user_message, categories=get_categories(user_message))
     movie_candidates = _to_movie_candidates(candidates)
@@ -824,7 +848,12 @@ def _choose_title_response(
     )
     store.create(
         query_id=query_id,
-        request=_snapshot_request_payload(user_message=user_message, search_request=base_request, settings=settings),
+        request=_snapshot_request_payload(
+            user_message=user_message,
+            search_request=base_request,
+            settings=settings,
+            requester_id=requester_id,
+        ),
         status="title_candidates",
         reason="title_candidates_ready",
         results=[],
@@ -1176,9 +1205,11 @@ def _snapshot_request_payload(
     user_message: str,
     search_request: SearchRequest,
     settings: Settings,
+    requester_id: str | None,
 ) -> dict:
     return {
         "input": user_message,
+        "requester_id": requester_id,
         "identifier": search_request.identifier,
         "query": search_request.query,
         "categories": search_request.categories,

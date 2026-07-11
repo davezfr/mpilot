@@ -3,8 +3,10 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from mpilot.subtitles import cli as cli_module
+from mpilot.subtitles.providers import base as provider_base
 from mpilot.subtitles.cli import build_parser, build_plex_online_subtitle_fetcher, subtitle_fetch_summary, subtitle_search_summary
 from mpilot.subtitles.plex_resolver import PlexResolvedMedia
 from mpilot.subtitles.provider_policy import (
@@ -160,6 +162,42 @@ def zip_payload_files(files):
 
 
 class SubtitleProviderTests(unittest.TestCase):
+    def test_provider_download_rejects_non_http_url(self):
+        with self.assertRaisesRegex(SubtitleProviderApiError, "must use http or https"):
+            provider_base.download_bytes("file:///etc/passwd", {}, 1)
+
+    def test_provider_json_response_has_a_hard_size_limit(self):
+        with patch.object(provider_base, "MAX_PROVIDER_JSON_BYTES", 4), patch(
+            "urllib.request.urlopen", return_value=io.BytesIO(b'{"ok":true}')
+        ):
+            with self.assertRaisesRegex(SubtitleProviderApiError, "JSON response exceeded"):
+                provider_base.get_json("https://provider.test", {}, {}, 1)
+
+    def test_provider_download_has_a_hard_size_limit(self):
+        with patch.object(provider_base, "MAX_PROVIDER_DOWNLOAD_BYTES", 4), patch(
+            "urllib.request.urlopen", return_value=io.BytesIO(b"12345")
+        ):
+            with self.assertRaisesRegex(SubtitleProviderApiError, "subtitle download exceeded"):
+                provider_base.download_bytes("https://provider.test/subtitle", {}, 1)
+
+    def test_zip_member_uncompressed_size_is_limited(self):
+        payload = zip_payload("Movie.en.srt", "12345")
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            provider_base, "MAX_EXTRACTED_SUBTITLE_BYTES", 4
+        ):
+            with self.assertRaisesRegex(SubtitleProviderApiError, "extracted subtitle exceeded"):
+                provider_base.write_downloaded_subtitle(
+                    "test", payload, Path(tmp), "Movie.zip", "https://provider.test/Movie.zip"
+                )
+
+    def test_zip_member_count_is_limited(self):
+        payload = zip_payload_files([("one.srt", "one"), ("two.srt", "two")])
+        with tempfile.TemporaryDirectory() as tmp, patch.object(provider_base, "MAX_ZIP_MEMBERS", 1):
+            with self.assertRaisesRegex(SubtitleProviderApiError, "1-member limit"):
+                provider_base.write_downloaded_subtitle(
+                    "test", payload, Path(tmp), "Movie.zip", "https://provider.test/Movie.zip"
+                )
+
     def test_opensubtitles_searches_by_imdb_and_parses_candidates(self):
         http = FakeHttpGet(
             {

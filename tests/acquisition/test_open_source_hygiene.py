@@ -61,6 +61,19 @@ def test_pyproject_exposes_only_mpilot_console_scripts():
     assert pyproject["tool"]["setuptools"]["packages"]["find"]["include"] == ["mpilot*"]
 
 
+def test_dependency_groups_and_requirements_stay_in_sync():
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    optional = pyproject["project"]["optional-dependencies"]
+    requirements = {
+        line.strip()
+        for line in (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert set(optional["all"]) == set(optional["download"]) | set(optional["mcp"])
+    assert requirements == set(optional["all"])
+
+
 def test_legacy_entrypoints_and_shim_packages_are_not_tracked():
     forbidden_paths = {
         "app",
@@ -131,6 +144,7 @@ def test_tracked_text_files_do_not_reintroduce_old_public_entrypoints():
 def test_dockerfile_runs_api_as_mpilot_non_root_user():
     dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text(encoding="utf-8")
 
+    assert 'pip install --no-cache-dir ".[download,mcp]"' in dockerfile
     assert "adduser --system --ingroup mpilot mpilot" in dockerfile
     assert "USER mpilot" in dockerfile
 
@@ -144,6 +158,16 @@ def test_compose_uses_pinned_third_party_image_tags():
     assert "container_name: mpilot-api" in compose
 
 
+def test_compose_binds_public_services_to_loopback_only():
+    compose = (REPO_ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert '"127.0.0.1:8000:8000"' in compose
+    assert '"127.0.0.1:9696:9696"' in compose
+    assert '"8000:8000"' not in compose
+    assert '"9696:9696"' not in compose
+    assert "8191:8191" not in compose
+
+
 def test_github_actions_runs_pytest_on_push_and_pull_request():
     workflow = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
@@ -152,3 +176,6 @@ def test_github_actions_runs_pytest_on_push_and_pull_request():
     assert "pull_request:" in content
     assert "push:" in content
     assert "python -m pytest -q" in content
+    assert "python -m pip_audit -r requirements.txt" in content
+    assert "Verify dependency-free base CLI" in content
+    assert "/tmp/mpilot-base/bin/mpilot --help" in content

@@ -200,6 +200,35 @@ def test_qbitlarr_api_client_download_posts_expected_payload():
     }
 
 
+def test_qbitlarr_api_client_binds_configured_requester_id():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=[])
+
+    client = AcquisitionApiClient(
+        api_url="http://qbitlarr.test/",
+        requester_id="telegram:123",
+        transport=httpx.MockTransport(handler),
+    )
+
+    asyncio.run(client.list_downloads())
+
+    assert requests[0].url.params["user_id"] == "telegram:123"
+
+
+def test_qbitlarr_api_client_rejects_requester_override():
+    client = AcquisitionApiClient(
+        api_url="http://qbitlarr.test/",
+        requester_id="telegram:123",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=[])),
+    )
+
+    with pytest.raises(AcquisitionApiError, match="does not match"):
+        asyncio.run(client.list_downloads(user_id="telegram:456"))
+
+
 def test_qbitlarr_api_client_handle_posts_expected_payload():
     requests: list[httpx.Request] = []
 

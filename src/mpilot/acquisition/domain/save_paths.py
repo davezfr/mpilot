@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import posixpath
 import re
 
 from mpilot.acquisition.config import Settings
@@ -17,8 +18,8 @@ def validate_save_path_override(save_path: str | None, settings: Settings) -> st
     if save_path is None:
         return None
 
-    normalized = _normalize_path(save_path)
-    allowed_roots = [_normalize_path(path) for path in _allowed_save_paths(settings) if path]
+    normalized = _canonical_posix_path(save_path)
+    allowed_roots = [_canonical_posix_path(path) for path in _allowed_save_paths(settings) if path]
     if any(_is_same_or_child(normalized, root) for root in allowed_roots):
         return normalized
 
@@ -52,18 +53,26 @@ def _allowed_save_paths(settings: Settings) -> list[str]:
 
 
 def _normalize_path(path: str) -> str:
-    normalized = path.strip().replace("\\", "/")
-    while "//" in normalized:
-        normalized = normalized.replace("//", "/")
-    if len(normalized) > 1:
-        normalized = normalized.rstrip("/")
-    return normalized
+    return _canonical_posix_path(path)
 
 
 def _is_same_or_child(path: str, root: str) -> bool:
     if path == root:
         return True
-    return path.startswith(f"{root}/")
+    return posixpath.commonpath([path, root]) == root
+
+
+def _canonical_posix_path(path: str) -> str:
+    value = path.strip()
+    if not value.startswith("/") or "\\" in value or "\0" in value:
+        raise ValueError("save_path must be inside a configured qBitlarr save path")
+    parts = [part for part in value.split("/") if part]
+    if any(part in {".", ".."} for part in parts):
+        raise ValueError("save_path must be inside a configured qBitlarr save path")
+    normalized = "/" + "/".join(parts)
+    if normalized == "/":
+        raise ValueError("save_path must be inside a configured qBitlarr save path")
+    return normalized
 
 
 _TV_SHOW_MARKER_RE = re.compile(

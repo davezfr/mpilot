@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from mpilot.mcp import server as unified
@@ -63,6 +66,8 @@ class UnifiedMcpServerTests(unittest.TestCase):
                 "QBITLARR_API_URL": "http://127.0.0.1:1",
                 "PLEX_BASE_URL": "http://plex.test:32400",
                 "PLEX_TOKEN": "token",
+                "MPILOT_ENABLE_RUNTIME_OPERATOR_TOOLS": "true",
+                "MPILOT_ENABLE_ACQUISITION_CONTROL_TOOLS": "true",
             }
         )
 
@@ -99,7 +104,9 @@ class UnifiedMcpServerTests(unittest.TestCase):
 
         self.assertIn("acquisition_handle", server.tool_names)
         self.assertIn("media_request", server.tool_names)
-        self.assertIn("queue_status", server.tool_names)
+        self.assertNotIn("queue_status", server.tool_names)
+        self.assertNotIn("workflow_show", server.tool_names)
+        self.assertNotIn("acquisition_delete_download", server.tool_names)
         self.assertNotIn("job_create", server.tool_names)
         self.assertNotIn("plex_search", server.tool_names)
 
@@ -108,9 +115,25 @@ class UnifiedMcpServerTests(unittest.TestCase):
 
         self.assertIn("job_create", server.tool_names)
         self.assertIn("subtitle_plan", server.tool_names)
-        self.assertIn("queue_status", server.tool_names)
+        self.assertNotIn("queue_status", server.tool_names)
         self.assertNotIn("media_request", server.tool_names)
         self.assertNotIn("acquisition_handle", server.tool_names)
+
+    def test_operator_and_destructive_tools_require_explicit_opt_in(self):
+        server = _create_server_with_env(
+            {
+                "QBITLARR_API_URL": "http://127.0.0.1:1",
+                "MPILOT_ENABLE_RUNTIME_OPERATOR_TOOLS": "true",
+                "MPILOT_ENABLE_ACQUISITION_CONTROL_TOOLS": "true",
+            }
+        )
+
+        self.assertIn("queue_status", server.tool_names)
+        self.assertIn("workflow_show", server.tool_names)
+        self.assertIn("list_workflows", server.tool_names)
+        self.assertIn("acquisition_pause_download", server.tool_names)
+        self.assertIn("acquisition_resume_download", server.tool_names)
+        self.assertIn("acquisition_delete_download", server.tool_names)
 
     def test_media_request_without_subtitles_is_qbitlarr_handle_passthrough(self):
         client = FakeAcquisitionClient(
@@ -176,6 +199,36 @@ class UnifiedMcpServerTests(unittest.TestCase):
         self.assertEqual(calls[0]["target_language"], "zh")
         self.assertEqual(calls[0]["output_mode"], "bilingual-ass")
         self.assertEqual(calls[0]["imdb_id"], "tt1234567")
+        self.assertNotIn("runtime_store_dir", calls[0])
+
+    def test_media_request_composes_with_real_runtime_tool_contract(self):
+        client = FakeAcquisitionClient(
+            {
+                "status": "success",
+                "action": "auto_download",
+                "title": "Example Movie",
+                "download_status": {"hash": "abc123", "name": "Example.Movie.mkv", "progress": 0.25},
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {"MPILOT_RUNTIME_STORE_DIR": tmp},
+            clear=False,
+        ), patch.object(unified, "get_acquisition_client", return_value=client):
+            payload = asyncio.run(
+                unified.media_request(
+                    "Example Movie",
+                    requester_id="user-123",
+                    subtitle_target_language="zh",
+                    mode="auto",
+                )
+            )
+            workflow_files = list(Path(tmp).glob("workflow_*.json"))
+
+        self.assertEqual(payload["subtitle_intent"]["status"], "registered")
+        self.assertEqual(len(workflow_files), 1)
+        self.assertNotIn("runtime_store_dir", inspect.signature(unified.media_request).parameters)
 
     def test_media_request_carries_subtitle_intent_through_clarify_payload(self):
         client = FakeAcquisitionClient(
@@ -214,6 +267,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
             payload["subtitle_intent"]["continue_with"]["arguments"]["subtitle_target_language"],
             "zh",
         )
+        self.assertNotIn("runtime_store_dir", payload["subtitle_intent"]["continue_with"]["arguments"])
 
     def test_media_request_keeps_download_payload_when_runtime_registration_fails(self):
         client = FakeAcquisitionClient(
