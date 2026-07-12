@@ -20,6 +20,7 @@ from mpilot.api.main import (
     normalize_search_results,
 )
 from mpilot.acquisition.models import TorrentStatus
+from mpilot.acquisition.exceptions import ConfigurationError
 
 
 @pytest.fixture(autouse=True)
@@ -96,6 +97,37 @@ def test_settings_prefers_mpilot_acquisition_env_aliases(monkeypatch):
     assert settings.qbitlarr_save_path_movie_4k == "/media/Movies 4K"
     assert settings.qbitlarr_save_path_tv == "/media/TV"
     assert settings.manual_result_limit == 6
+
+
+def test_settings_loads_imdb_indexer_search_mode_lists(monkeypatch):
+    monkeypatch.setenv("MPILOT_PROWLARR_URL", "http://prowlarr:9696")
+    monkeypatch.setenv("MPILOT_PROWLARR_API_KEY", "prowlarr-key")
+    monkeypatch.setenv("MPILOT_QBIT_URL", "http://qbit:8080")
+    monkeypatch.setenv("MPILOT_QBIT_USERNAME", "user")
+    monkeypatch.setenv("MPILOT_QBIT_PASSWORD", "pass")
+    monkeypatch.setenv("MPILOT_PROWLARR_IMDB_NATIVE_INDEXER_IDS", "5,6")
+    monkeypatch.setenv("MPILOT_PROWLARR_IMDB_KEYWORD_INDEXER_IDS", "4")
+    monkeypatch.setenv("MPILOT_PROWLARR_IMDB_DISABLED_INDEXER_IDS", "1,3")
+
+    settings = Settings.from_env()
+
+    assert settings.prowlarr_imdb_native_indexer_ids == [5, 6]
+    assert settings.prowlarr_imdb_keyword_indexer_ids == [4]
+    assert settings.prowlarr_imdb_disabled_indexer_ids == [1, 3]
+    assert settings.imdb_indexer_routing_configured is True
+
+
+def test_settings_rejects_indexer_in_multiple_imdb_search_modes(monkeypatch):
+    monkeypatch.setenv("MPILOT_PROWLARR_URL", "http://prowlarr:9696")
+    monkeypatch.setenv("MPILOT_PROWLARR_API_KEY", "prowlarr-key")
+    monkeypatch.setenv("MPILOT_QBIT_URL", "http://qbit:8080")
+    monkeypatch.setenv("MPILOT_QBIT_USERNAME", "user")
+    monkeypatch.setenv("MPILOT_QBIT_PASSWORD", "pass")
+    monkeypatch.setenv("MPILOT_PROWLARR_IMDB_NATIVE_INDEXER_IDS", "5,6")
+    monkeypatch.setenv("MPILOT_PROWLARR_IMDB_KEYWORD_INDEXER_IDS", "6")
+
+    with pytest.raises(ConfigurationError, match="only one search mode: 6"):
+        Settings.from_env()
 
 
 def test_settings_accepts_custom_choice_display(monkeypatch):
@@ -473,6 +505,15 @@ def test_build_prowlarr_search_params_includes_categories_when_provided():
     params = build_prowlarr_search_params(request)
 
     assert params["categories"] == [2040]
+
+
+def test_build_prowlarr_search_params_accepts_structured_search_type():
+    request = SearchRequest(query="{ImdbId:tt0045877}", categories=[2000])
+
+    params = build_prowlarr_search_params(request, search_type="movie")
+
+    assert params["query"] == "{ImdbId:tt0045877}"
+    assert params["type"] == "movie"
 
 
 def test_build_prowlarr_search_params_includes_indexer_ids_when_provided():
@@ -1089,6 +1130,8 @@ def test_prowlarr_indexers_endpoint_returns_discoverable_indexer_ids(monkeypatch
             "name": "Trusted Indexer",
             "enabled": True,
             "protocol": "torrent",
+            "supports_imdb_parameter": False,
+            "imdb_search_mode": "unconfigured",
         }
     ]
 

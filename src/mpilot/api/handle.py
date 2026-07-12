@@ -67,14 +67,7 @@ DEFAULT_CHOICE_STYLE = "hermes-default"
 CHOICE_STYLES = {"hermes-default", "telegram-rich"}
 MANUAL_RESULTS_MESSAGE = "Here are the top results, please reply with the number:"
 AUTO_FALLBACK_MESSAGE = "No suitable auto-download found. Here are the top results, please reply with the number:"
-DEFAULT_SEARCH_CATEGORIES = [2040, 5040]
-FULL_MOVIE_TV_CATEGORIES = [2000, 5000]
-FULL_CATEGORY_KEYWORDS = (
-    "4K",
-    "2160p",
-    "UHD",
-    "REMUX",
-)
+DEFAULT_SEARCH_CATEGORIES = [2000, 5000]
 METADATA_VERIFICATION_LIMIT = 10
 METADATA_VERIFICATION_BATCH_SIZE = 2
 EXTERNAL_ID_UNRESOLVED_MESSAGE = (
@@ -240,13 +233,6 @@ async def _handle_imdb_request(
     prefer_premium = contains_premium_quality_request(user_message)
     requested_resolution = extract_requested_resolution(user_message)
     preferences = _preferences(settings)
-    initial_selected = _select_best_result(
-        primary_results,
-        media_type=media_type,
-        prefer_premium=prefer_premium,
-        requested_resolution=requested_resolution,
-        preferences=preferences,
-    )
     skip_existing_check = mode == "manual"
     existing_download = None
     if not skip_existing_check:
@@ -305,19 +291,6 @@ async def _handle_imdb_request(
             ),
             alternatives=_to_manual_results(primary_ranked[:_INLINE_ALTERNATIVE_LIMIT], compact_labels=True) or None,
         )
-
-    if _should_refine_imdb_title_search(
-        initial_selected,
-        media_type=media_type,
-        prefer_premium=prefer_premium,
-        requested_resolution=requested_resolution,
-        preferences=preferences,
-    ):
-        primary_results = _merge_results(
-            primary_results,
-            await _search_title_refinement(base_request, settings, initial_results=primary_results),
-        )
-        media_type = infer_media_type(user_message, primary_results)
 
     selected = await _select_best_verified_result(
         primary_results,
@@ -789,9 +762,7 @@ def _pluralize_seeder(seeders: int) -> str:
 
 
 def get_categories(user_message: str) -> list[int]:
-    normalized_message = user_message.casefold()
-    if any(keyword.casefold() in normalized_message for keyword in FULL_CATEGORY_KEYWORDS):
-        return list(FULL_MOVIE_TV_CATEGORIES)
+    del user_message
     return list(DEFAULT_SEARCH_CATEGORIES)
 
 
@@ -1018,10 +989,7 @@ def _rank_results(
 
         ranked.append((rank_score, result.seeders or 0, result.size or 0, result))
 
-    if require_min_seeders:
-        ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
-    else:
-        ranked.sort(key=lambda item: (item[1], item[0], item[2]), reverse=True)
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
     return [item[3] for item in ranked]
 
 
@@ -1049,6 +1017,7 @@ def _result_rank_score(
         prefer_premium=prefer_premium,
         requested_resolution=requested_resolution,
         preferences=preferences,
+        allow_resolution_fallback=requested_resolution is None and not prefer_premium,
     )
     if preference_score is None:
         return None
@@ -1061,50 +1030,6 @@ async def _search_primary(request: SearchRequest, settings: Settings) -> list[Se
         request.model_copy(update={"indexer_ids": _primary_indexer_ids(settings)}),
         settings,
     )
-
-
-async def _search_title_refinement(
-    base_request: SearchRequest,
-    settings: Settings,
-    *,
-    initial_results: list[SearchResult],
-) -> list[SearchResult]:
-    refinement_query = _derive_refinement_query(initial_results)
-    if not refinement_query or refinement_query == base_request.query:
-        return []
-
-    try:
-        return await _search_primary(base_request.model_copy(update={"query": refinement_query}), settings)
-    except UpstreamServiceError:
-        logger.warning("IMDb title refinement search failed for query=%s", refinement_query)
-        return []
-
-
-def _derive_refinement_query(results: list[SearchResult]) -> str | None:
-    for result in results:
-        candidate = clean_display_title(result.title)
-        if candidate and candidate != result.title:
-            return candidate
-    return None
-
-
-def _should_refine_imdb_title_search(
-    selected: SearchResult | None,
-    *,
-    media_type: MediaType,
-    prefer_premium: bool,
-    requested_resolution: str | None,
-    preferences: QualityPreferences = DEFAULT_QUALITY_PREFERENCES,
-) -> bool:
-    if prefer_premium or requested_resolution not in {None, preferences.resolution}:
-        return False
-    if selected is None:
-        return True
-
-    parsed = parse_quality(selected.title)
-    if media_type == "tv":
-        return not (parsed.is_amzn and parsed.source == preferences.source and parsed.codec == preferences.codec)
-    return not (parsed.source == preferences.source and parsed.codec == preferences.codec)
 
 
 async def _search_fallback_and_append(

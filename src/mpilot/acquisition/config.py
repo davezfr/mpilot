@@ -36,6 +36,9 @@ class Settings:
     query_snapshot_dir: str = "data/query-snapshots"
     prowlarr_primary_indexer_ids: list[int] | None = None
     prowlarr_fallback_indexer_ids: list[int] | None = None
+    prowlarr_imdb_native_indexer_ids: list[int] | None = None
+    prowlarr_imdb_keyword_indexer_ids: list[int] | None = None
+    prowlarr_imdb_disabled_indexer_ids: list[int] | None = None
     qbitlarr_api_key: str | None = None
     qbitlarr_save_path_movie: str = "/downloads/movies"
     qbitlarr_save_path_movie_4k: str = "/downloads/movies-4k"
@@ -57,6 +60,34 @@ class Settings:
     cleanup_interval_seconds: int = 21_600
     cleanup_include_legacy_requester_tags: bool = True
     query_snapshot_retention_seconds: int = 604_800
+
+    def __post_init__(self) -> None:
+        groups = {
+            "native": set(self.prowlarr_imdb_native_indexer_ids or []),
+            "keyword": set(self.prowlarr_imdb_keyword_indexer_ids or []),
+            "disabled": set(self.prowlarr_imdb_disabled_indexer_ids or []),
+        }
+        overlaps = {
+            indexer_id
+            for mode, ids in groups.items()
+            for other_mode, other_ids in groups.items()
+            if mode < other_mode
+            for indexer_id in ids & other_ids
+        }
+        if overlaps:
+            joined = ", ".join(str(indexer_id) for indexer_id in sorted(overlaps))
+            raise ConfigurationError(f"IMDb indexer IDs must belong to only one search mode: {joined}")
+
+    @property
+    def imdb_indexer_routing_configured(self) -> bool:
+        return any(
+            value is not None
+            for value in (
+                self.prowlarr_imdb_native_indexer_ids,
+                self.prowlarr_imdb_keyword_indexer_ids,
+                self.prowlarr_imdb_disabled_indexer_ids,
+            )
+        )
 
     @property
     def quality_preferences(self) -> QualityPreferences:
@@ -80,6 +111,9 @@ class Settings:
             query_snapshot_dir=_env_with_default("QBITLARR_QUERY_SNAPSHOT_DIR", "data/query-snapshots"),
             prowlarr_primary_indexer_ids=_optional_int_list("PROWLARR_PRIMARY_INDEXER_IDS"),
             prowlarr_fallback_indexer_ids=_optional_int_list("PROWLARR_FALLBACK_INDEXER_IDS"),
+            prowlarr_imdb_native_indexer_ids=_optional_int_list("PROWLARR_IMDB_NATIVE_INDEXER_IDS"),
+            prowlarr_imdb_keyword_indexer_ids=_optional_int_list("PROWLARR_IMDB_KEYWORD_INDEXER_IDS"),
+            prowlarr_imdb_disabled_indexer_ids=_optional_int_list("PROWLARR_IMDB_DISABLED_INDEXER_IDS"),
             qbitlarr_api_key=_optional_str_env("QBITLARR_API_KEY"),
             qbitlarr_save_path_movie=_env_with_default("QBITLARR_SAVE_PATH_MOVIE", "/downloads/movies"),
             qbitlarr_save_path_movie_4k=_env_with_default("QBITLARR_SAVE_PATH_MOVIE_4K", "/downloads/movies-4k"),

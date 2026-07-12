@@ -237,6 +237,7 @@ def calculate_quality_preference(
     prefer_premium: bool,
     requested_resolution: str | None = None,
     preferences: QualityPreferences = DEFAULT_QUALITY_PREFERENCES,
+    allow_resolution_fallback: bool = False,
 ) -> int | None:
     parsed = parse_quality(result.title)
     if not _matches_quality_request(
@@ -244,6 +245,7 @@ def calculate_quality_preference(
         prefer_premium=prefer_premium,
         requested_resolution=requested_resolution,
         preferences=preferences,
+        allow_resolution_fallback=allow_resolution_fallback,
     ):
         return None
 
@@ -300,12 +302,16 @@ def _matches_quality_request(
     prefer_premium: bool,
     requested_resolution: str | None,
     preferences: QualityPreferences,
+    allow_resolution_fallback: bool = False,
 ) -> bool:
     if requested_resolution:
         return parsed.resolution == requested_resolution
 
     if prefer_premium:
         return parsed.is_premium
+
+    if allow_resolution_fallback:
+        return True
 
     return parsed.resolution == preferences.resolution
 

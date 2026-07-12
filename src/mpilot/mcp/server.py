@@ -555,10 +555,12 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
 
     @mcp.tool()
     async def acquisition_list_indexers() -> list[dict[str, Any]]:
-        """List configured Prowlarr indexers and their numeric IDs.
+        """List configured Prowlarr indexers, IDs, and IMDb search modes.
 
-        Use this when setting primary or fallback indexer IDs. Each item
-        includes id, name, enabled, and protocol when Prowlarr provides them.
+        Use this when setting primary/fallback IDs or classifying an indexer as
+        native, keyword, or disabled for IMDb-only acquisition. Each item also
+        reports whether Prowlarr advertises native imdbid support. Unconfigured
+        indexers are skipped once strict IMDb routing is enabled.
         """
         return await get_acquisition_client().list_prowlarr_indexers()
 

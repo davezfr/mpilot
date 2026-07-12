@@ -166,6 +166,7 @@ class DownloadResponse(BaseModel):
 
 
 HandleMode = Literal["auto", "manual", "confirm"]
+IndexerImdbSearchMode = Literal["native", "keyword", "disabled", "unconfigured", "legacy_keyword"]
 
 
 class HandleRequest(BaseModel):
@@ -360,3 +361,5 @@ class ProwlarrIndexer(BaseModel):
     name: str | None = None
     enabled: bool | None = None
     protocol: str | None = None
+    supports_imdb_parameter: bool = False
+    imdb_search_mode: IndexerImdbSearchMode = "unconfigured"

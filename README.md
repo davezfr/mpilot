@@ -149,7 +149,28 @@ MPILOT_QBIT_PASSWORD=replace-with-webui-password
 MPILOT_ACQUISITION_SAVE_PATH_MOVIE=/downloads/movies
 MPILOT_ACQUISITION_SAVE_PATH_MOVIE_4K=/downloads/movies-4k
 MPILOT_ACQUISITION_SAVE_PATH_TV=/downloads/tv
+
+# Example only: discover the IDs from your own Prowlarr instance first.
+MPILOT_PROWLARR_IMDB_NATIVE_INDEXER_IDS=5,6
+MPILOT_PROWLARR_IMDB_KEYWORD_INDEXER_IDS=4
+MPILOT_PROWLARR_IMDB_DISABLED_INDEXER_IDS=1,3
 ```
+
+MPilot keeps IMDb acquisition ID-only while adapting the request to each
+indexer. `native` indexers receive Prowlarr's structured IMDb query;
+`keyword` indexers receive the literal `tt...` value; `disabled` indexers are
+recorded but skipped. Once any of these three lists is configured, a newly
+added Prowlarr indexer is reported as `unconfigured` and is not used for IMDb
+requests until you classify it. This prevents a new source from silently
+receiving the wrong query form.
+
+Run `mpilot acquisition indexers` (or call `acquisition_list_indexers`) to see
+the central summary. Each row includes the effective `imdb_search_mode` and
+whether Prowlarr advertises native `imdbid` support. Indexer IDs are local to
+your Prowlarr instance, so do not copy the example numbers blindly. IMDb
+searches use the parent categories `Movies/2000` and `TV/5000`; MPilot applies
+the 1080p/source/codec preference after results are returned instead of relying
+on inconsistent source-side HD category mappings.
 
 The acquisition REST API fails closed when `MPILOT_ACQUISITION_API_KEY` is
 unset. Clients must send the same value in `X-API-Key`. For a strictly local

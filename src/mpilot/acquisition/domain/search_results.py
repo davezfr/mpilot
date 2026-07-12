@@ -27,7 +27,11 @@ IDENTIFIER_PARAM_NAMES = {
 }
 
 
-def build_prowlarr_search_params(request: SearchRequest) -> dict[str, Any]:
+def build_prowlarr_search_params(
+    request: SearchRequest,
+    *,
+    search_type: str = "search",
+) -> dict[str, Any]:
     query_parts = []
 
     identifier_query = _format_identifier_for_prowlarr(request.identifier)
@@ -51,7 +55,7 @@ def build_prowlarr_search_params(request: SearchRequest) -> dict[str, Any]:
 
     params: dict[str, Any] = {
         "query": " ".join(query_parts),
-        "type": "search",
+        "type": search_type,
         "limit": PROWLARR_UPSTREAM_LIMIT,
         "offset": 0,
     }

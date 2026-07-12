@@ -140,8 +140,8 @@ def test_normalize_user_message_canonicalizes_imdb_links_from_messengers():
     assert extract_imdb_id(raw_message) == "tt0045877"
 
 
-def test_get_categories_defaults_to_movie_and_tv_hd():
-    assert get_categories("The Hitch-Hiker") == [2040, 5040]
+def test_get_categories_defaults_to_movie_and_tv_parent_categories():
+    assert get_categories("The Hitch-Hiker") == [2000, 5000]
 
 
 @pytest.mark.parametrize(
@@ -168,8 +168,8 @@ def test_get_categories_uses_all_movie_and_tv_categories_for_premium_keywords(me
         "The Hitch-Hiker HDR",
     ],
 )
-def test_get_categories_keeps_movie_hd_for_non_uhd_premium_keywords(message):
-    assert get_categories(message) == [2040, 5040]
+def test_get_categories_keeps_parent_categories_for_non_uhd_quality_keywords(message):
+    assert get_categories(message) == [2000, 5000]
 
 
 def _candidate(title, *, imdb_id, year=None):
@@ -357,7 +357,7 @@ def test_handle_imdb_id_auto_downloads_best_movie_to_movie_path(monkeypatch, tmp
     async def fake_search_prowlarr(request, settings):
         assert request.identifier is None
         assert request.query == "tt0045877"
-        assert request.categories == [2040, 5040]
+        assert request.categories == [2000, 5000]
         return [
             _result("The.Hitch-Hiker.1953.1080p.WEBRip.H.264-GRP", seeders=120, link_suffix="webrip"),
             _result("The.Hitch-Hiker.1953.1080p.WEB-DL.H.265-GRP", seeders=80, link_suffix="h265"),
@@ -428,7 +428,7 @@ def test_handle_imdb_id_auto_downloads_tv_to_tv_path(monkeypatch, tmp_path):
 
     async def fake_search_prowlarr(request, settings):
         assert request.query == "tt0017925"
-        assert request.categories == [2040, 5040]
+        assert request.categories == [2000, 5000]
         return [_result("Example.Show.S03.1080p.AMZN.WEB-DL.H.264-GRP", seeders=50, link_suffix="tv")]
 
     async def fake_add_download(download_link, settings, *, save_path=None, requester_id=None):
@@ -539,7 +539,7 @@ def test_auto_download_message_omits_seeder_count_when_unknown():
     assert message == "Within Our Gates (1920) is now downloading. You can ask for a status update any time."
 
 
-def test_handle_imdb_id_refines_by_title_before_auto_download(monkeypatch, tmp_path):
+def test_handle_imdb_id_never_refines_by_title_before_auto_download(monkeypatch, tmp_path):
     queued: dict[str, str] = {}
     calls: list[str | None] = []
 
@@ -547,8 +547,6 @@ def test_handle_imdb_id_refines_by_title_before_auto_download(monkeypatch, tmp_p
         calls.append(request.query)
         if request.query == "tt0045877":
             return [_result("The.Hitch-Hiker.1953.1080p.WEBRip.H.264-GRP", seeders=120, link_suffix="webrip")]
-        if request.query == "The Hitch-Hiker (1953)":
-            return [_result("The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GRP", seeders=9, link_suffix="h264")]
         raise AssertionError(f"unexpected query: {request.query}")
 
     async def fake_add_download(download_link, settings, *, save_path=None, requester_id=None):
@@ -563,9 +561,9 @@ def test_handle_imdb_id_refines_by_title_before_auto_download(monkeypatch, tmp_p
     response = client.post("/handle", json={"user_message": "tt0045877"})
 
     assert response.status_code == 200
-    assert response.json()["quality"] == "1080p WEB-DL H.264"
-    assert queued["download_link"] == "https://example.test/h264.torrent"
-    assert calls == ["tt0045877", "The Hitch-Hiker (1953)"]
+    assert response.json()["quality"] == "1080p WEBRip H.264"
+    assert queued["download_link"] == "https://example.test/webrip.torrent"
+    assert calls == ["tt0045877"]
 
 
 def test_handle_imdb_id_uses_torrent_metadata_title_for_auto_selection(monkeypatch, tmp_path):
@@ -691,7 +689,7 @@ def test_handle_imdb_shared_url_searches_embedded_id_as_keyword(monkeypatch, tmp
     async def fake_search_prowlarr(request, settings):
         assert request.identifier is None
         assert request.query == "tt0045877"
-        assert request.categories == [2040, 5040]
+        assert request.categories == [2000, 5000]
         return [_result("The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GRP", seeders=50, link_suffix="h264")]
 
     async def fake_add_download(download_link, settings, *, save_path=None, requester_id=None):
@@ -813,7 +811,7 @@ def test_handle_keyword_choose_title_label_falls_back_to_title_without_year(monk
 def test_handle_imdb_id_returns_manual_list_when_no_result_meets_seed_threshold(monkeypatch, tmp_path):
     async def fake_search_prowlarr(request, settings):
         assert request.identifier is None
-        assert request.categories == [2040, 5040]
+        assert request.categories == [2000, 5000]
         if request.query == "tt0017925":
             return [
                 _result("Example.Show.S03.1080p.AMZN.WEB-DL.H.264-GRP", seeders=4, link_suffix="low"),
@@ -839,8 +837,9 @@ def test_handle_imdb_id_returns_manual_list_when_no_result_meets_seed_threshold(
     assert payload["action"] == "show_results"
     assert payload["message"] == "No suitable auto-download found. Here are the top results, please reply with the number:"
     _assert_english_message(payload)
-    assert len(payload["results"]) == 1
+    assert len(payload["results"]) == 2
     assert payload["results"][0]["title"] == "Example.Show.S03.1080p.AMZN.WEB-DL.H.264-GRP"
+    assert payload["results"][1]["title"] == "Example.Show.S03.720p.WEB-DL.H.264-GRP"
 
 
 def _settings_with_prefs(tmp_path, **overrides):
@@ -863,6 +862,7 @@ def test_handle_mode_manual_skips_auto_download_and_returns_ranked_results(monke
 
     async def fake_search_prowlarr(request, settings):
         return [
+            _result("The.Hitch-Hiker.1953.720p.BluRay.H.264-GRP", seeders=500, link_suffix="720p"),
             _result("The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GRP", seeders=80, link_suffix="h264"),
             _result("The.Hitch-Hiker.1953.1080p.WEB-DL.H.265-GRP", seeders=40, link_suffix="h265"),
         ]
@@ -882,6 +882,28 @@ def test_handle_mode_manual_skips_auto_download_and_returns_ranked_results(monke
     assert payload["action"] == "show_results"
     assert "called" not in queued
     assert payload["results"][0]["title"] == "The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GRP"
+    assert any(result["title"].endswith("720p.BluRay.H.264-GRP") for result in payload["results"])
+
+
+def test_handle_mode_manual_surfaces_only_lower_quality_imdb_results(monkeypatch, tmp_path):
+    async def fake_search_prowlarr(request, settings):
+        return [
+            _result("Port.Authority.2019.720p.BluRay.H.264-GRP", seeders=2, link_suffix="720p"),
+            _result("Port.Authority.2019.DVDRip.x264-GRP", seeders=3, link_suffix="dvdrip"),
+        ]
+
+    monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings_with_prefs(tmp_path))
+
+    response = TestClient(app).post("/handle", json={"user_message": "tt7587282", "mode": "manual"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert [result["title"] for result in payload["results"]] == [
+        "Port.Authority.2019.720p.BluRay.H.264-GRP",
+        "Port.Authority.2019.DVDRip.x264-GRP",
+    ]
 
 
 def test_handle_mode_confirm_returns_top_pick_with_alternatives_no_download(monkeypatch, tmp_path):
@@ -967,7 +989,7 @@ def test_handle_default_mode_env_var_can_force_manual(monkeypatch, tmp_path):
     assert "called" not in queued
 
 
-def test_preference_env_vars_change_what_counts_as_default_match(monkeypatch, tmp_path):
+def test_preference_env_vars_rank_default_match_before_other_resolutions(monkeypatch, tmp_path):
     async def fake_search_prowlarr(request, settings):
         return [
             _result("The.Hitch-Hiker.1953.720p.WEB-DL.H.265-GRP", seeders=80, link_suffix="720"),
@@ -990,8 +1012,10 @@ def test_preference_env_vars_change_what_counts_as_default_match(monkeypatch, tm
     assert response.status_code == 200
     payload = response.json()
     titles = [r["title"] for r in payload["results"]]
-    assert "The.Hitch-Hiker.1953.720p.WEB-DL.H.265-GRP" in titles
-    assert "The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GRP" not in titles
+    assert titles == [
+        "The.Hitch-Hiker.1953.720p.WEB-DL.H.265-GRP",
+        "The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GRP",
+    ]
 
 
 def test_format_choice_label_keeps_differentiators_and_drops_default_resolution():
