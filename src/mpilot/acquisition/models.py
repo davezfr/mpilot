@@ -221,6 +221,7 @@ class ManualSearchResult(BaseModel):
     seeders: int | None = None
     size: int | None = None
     download_link: str
+    indexer: str | None = Field(default=None, description="Source indexer retained as result provenance")
     label: str | None = Field(
         default=None,
         description=(
@@ -276,8 +277,20 @@ class ChoiceRichMessage(BaseModel):
 
 class HandleResponse(BaseModel):
     status: Literal["success", "not_found"]
-    action: Literal["auto_download", "show_results", "confirm", "choose_title", "needs_imdb"]
+    action: Literal["auto_download", "show_results", "confirm", "choose_title", "needs_imdb", "complementary_search"]
     message: str
+    search_strategy: Literal["imdb", "complementary"] | None = Field(
+        default=None,
+        description="Search identity strategy used for these release results.",
+    )
+    query_used: str | None = Field(
+        default=None,
+        description="System-generated title/year query used for complementary results.",
+    )
+    results_verified_by_imdb_id: bool | None = Field(
+        default=None,
+        description="False for complementary title/year candidates, which are not IMDb-ID verified.",
+    )
     choices_table: str | None = Field(
         default=None,
         description=(
@@ -345,6 +358,7 @@ class QuerySnapshotEntry(BaseModel):
     reason: str
     created_at: str
     results: list[SearchResult]
+    metadata: dict = Field(default_factory=dict)
 
 
 class QuerySnapshot(BaseModel):
@@ -363,3 +377,4 @@ class ProwlarrIndexer(BaseModel):
     protocol: str | None = None
     supports_imdb_parameter: bool = False
     imdb_search_mode: IndexerImdbSearchMode = "unconfigured"
+    complementary_search_enabled: bool = False

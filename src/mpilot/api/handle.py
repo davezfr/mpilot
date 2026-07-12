@@ -30,6 +30,8 @@ from mpilot.acquisition.domain.choice_table import (
     render_choice_table,
     render_title_choice_rich_html,
     render_title_choice_table,
+    render_unverified_choice_rich_html,
+    render_unverified_choice_table,
 )
 from mpilot.acquisition.domain.save_paths import default_save_path_for_title, validate_save_path_override
 from mpilot.acquisition.domain.torrent_metadata import parse_torrent_name
@@ -67,6 +69,10 @@ DEFAULT_CHOICE_STYLE = "hermes-default"
 CHOICE_STYLES = {"hermes-default", "telegram-rich"}
 MANUAL_RESULTS_MESSAGE = "Here are the top results, please reply with the number:"
 AUTO_FALLBACK_MESSAGE = "No suitable auto-download found. Here are the top results, please reply with the number:"
+COMPLEMENTARY_TRIGGER_MESSAGE = (
+    "IMDb ID 搜索已完成，但没有找到结果。"
+    "现在将自动使用标准标题和年份进行补充搜索。"
+)
 DEFAULT_SEARCH_CATEGORIES = [2000, 5000]
 METADATA_VERIFICATION_LIMIT = 10
 METADATA_VERIFICATION_BATCH_SIZE = 2
@@ -228,8 +234,37 @@ async def _handle_imdb_request(
     mode: str = "auto",
 ) -> HandleResponse:
     base_request = SearchRequest(query=imdb_id, categories=get_categories(user_message))
-    primary_results = await _search_primary(base_request, settings)
+    primary_results = await search_prowlarr(base_request, settings)
     media_type = infer_media_type(user_message, primary_results)
+    if not primary_results:
+        store.create(
+            query_id=query_id,
+            request=_snapshot_request_payload(
+                user_message=user_message,
+                search_request=base_request,
+                settings=settings,
+                requester_id=requester_id,
+                imdb_id=imdb_id,
+                media_type=media_type,
+            ),
+            status="imdb_empty",
+            reason="imdb_no_results",
+            results=[],
+            metadata={"search_strategy": "imdb", "raw_result_count": 0},
+        )
+        return HandleResponse(
+            status="success",
+            action="complementary_search",
+            message=COMPLEMENTARY_TRIGGER_MESSAGE,
+            query_id=query_id,
+            snapshot_status="imdb_empty",
+            imdb_id=imdb_id,
+            media_type=media_type,
+            search_strategy="imdb",
+            results_verified_by_imdb_id=True,
+            results=[],
+        )
+
     prefer_premium = contains_premium_quality_request(user_message)
     requested_resolution = extract_requested_resolution(user_message)
     preferences = _preferences(settings)
@@ -260,6 +295,8 @@ async def _handle_imdb_request(
                 search_request=base_request,
                 settings=settings,
                 requester_id=requester_id,
+                imdb_id=imdb_id,
+                media_type=media_type,
             ),
             status="already_in_qbittorrent",
             reason="matching_download_exists",
@@ -277,6 +314,8 @@ async def _handle_imdb_request(
         return HandleResponse(
             status="success",
             action="auto_download",
+            search_strategy="imdb",
+            results_verified_by_imdb_id=True,
             imdb_id=imdb_id,
             media_type=media_type,
             title=display_title,
@@ -307,9 +346,7 @@ async def _handle_imdb_request(
         require_min_seeders=False,
         preferences=preferences,
     )
-    snapshot_status = "primary_ready" if primary_ranked else "primary_empty"
-    results_for_manual_fallback = primary_results
-    fallback_searched = False
+    snapshot_status = "imdb_ready"
 
     store.create(
         query_id=query_id,
@@ -318,24 +355,16 @@ async def _handle_imdb_request(
             search_request=base_request,
             settings=settings,
             requester_id=requester_id,
+            imdb_id=imdb_id,
+            media_type=media_type,
         ),
         status=snapshot_status,
-        reason="primary_results_ready" if primary_ranked else "primary_no_results",
+        reason="imdb_results_ready",
         results=primary_ranked,
+        metadata={"search_strategy": "imdb", "raw_result_count": len(primary_results)},
     )
 
     if mode == "manual":
-        _schedule_fallback_snapshot(
-            background_tasks,
-            query_id=query_id,
-            base_request=base_request,
-            settings=settings,
-            store=store,
-            existing_results=primary_ranked,
-            media_type=media_type,
-            prefer_premium=prefer_premium,
-            requested_resolution=requested_resolution,
-        )
         return _manual_results_response(
             primary_ranked,
             status="success" if primary_ranked else "not_found",
@@ -344,39 +373,15 @@ async def _handle_imdb_request(
             prefer_premium=prefer_premium,
             requested_resolution=requested_resolution,
             query_id=query_id,
-            snapshot_status="primary_ready" if primary_ranked else "not_found",
+            snapshot_status="imdb_ready",
             preferences=preferences,
             compact_labels=True,
             manual_result_limit=_manual_result_limit(settings),
             choice_style=_choice_style(settings),
+            imdb_id=imdb_id,
+            search_strategy="imdb",
+            results_verified_by_imdb_id=True,
         )
-
-    if not selected:
-        fallback_results = await _search_fallback_and_append(
-            query_id=query_id,
-            base_request=base_request,
-            settings=settings,
-            store=store,
-            existing_results=primary_ranked,
-            media_type=media_type,
-            prefer_premium=prefer_premium,
-            requested_resolution=requested_resolution,
-            require_min_seeders=False,
-        )
-        fallback_searched = True
-        results_for_manual_fallback = fallback_results
-        selected = await _select_best_verified_result(
-            fallback_results,
-            settings,
-            media_type=media_type,
-            prefer_premium=prefer_premium,
-            requested_resolution=requested_resolution,
-        )
-        if selected:
-            primary_results = fallback_results
-            snapshot_status = "fallback_ready"
-        else:
-            snapshot_status = "not_found"
 
     if not selected:
         logger.info(
@@ -385,32 +390,21 @@ async def _handle_imdb_request(
             media_type,
         )
         return _manual_results_response(
-            results_for_manual_fallback,
+            primary_ranked,
             status="not_found",
             message=AUTO_FALLBACK_MESSAGE,
             media_type=media_type,
             prefer_premium=prefer_premium,
             requested_resolution=requested_resolution,
             query_id=query_id,
-            snapshot_status=snapshot_status,
+            snapshot_status="imdb_ready",
             preferences=preferences,
             compact_labels=True,
             manual_result_limit=_manual_result_limit(settings),
             choice_style=_choice_style(settings),
-        )
-
-    if not fallback_searched:
-        snapshot_status = "primary_ready"
-        _schedule_fallback_snapshot(
-            background_tasks,
-            query_id=query_id,
-            base_request=base_request,
-            settings=settings,
-            store=store,
-            existing_results=primary_ranked,
-            media_type=media_type,
-            prefer_premium=prefer_premium,
-            requested_resolution=requested_resolution,
+            imdb_id=imdb_id,
+            search_strategy="imdb",
+            results_verified_by_imdb_id=True,
         )
 
     quality = format_quality(parse_quality(selected.title))
@@ -430,6 +424,8 @@ async def _handle_imdb_request(
         return HandleResponse(
             status="success",
             action="confirm",
+            search_strategy="imdb",
+            results_verified_by_imdb_id=True,
             imdb_id=imdb_id,
             media_type=media_type,
             title=display_title,
@@ -470,6 +466,8 @@ async def _handle_imdb_request(
     return HandleResponse(
         status="success",
         action="auto_download",
+        search_strategy="imdb",
+        results_verified_by_imdb_id=True,
         imdb_id=imdb_id,
         media_type=media_type,
         title=display_title,
@@ -548,6 +546,7 @@ def _to_manual_results(
                 seeders=result.seeders,
                 size=result.size,
                 download_link=result.download_link,
+                indexer=result.indexer,
                 label=format_choice_label(parsed) if compact_labels else result.title,
             )
         )
@@ -870,6 +869,10 @@ def _manual_results_response(
     compact_labels: bool = False,
     manual_result_limit: int = DEFAULT_MANUAL_RESULT_LIMIT,
     choice_style: str = DEFAULT_CHOICE_STYLE,
+    imdb_id: str | None = None,
+    search_strategy: str | None = None,
+    query_used: str | None = None,
+    results_verified_by_imdb_id: bool | None = None,
 ) -> HandleResponse:
     ranked_results = _rank_results(
         results,
@@ -884,7 +887,13 @@ def _manual_results_response(
         compact_labels=compact_labels,
         limit=manual_result_limit,
     )
-    rendered_choices_table = render_choice_table(manual_results) if compact_labels and manual_results else None
+    rendered_choices_table = None
+    if manual_results:
+        rendered_choices_table = (
+            render_choice_table(manual_results)
+            if results_verified_by_imdb_id is True
+            else render_unverified_choice_table(manual_results)
+        )
     choices_table, choice_display = _choice_rendering_fields(
         message,
         rendered_choices_table,
@@ -898,9 +907,22 @@ def _manual_results_response(
         choice_display=choice_display,
         choice_buttons=_choice_buttons(manual_results) if manual_results else None,
         ui_hints=_choice_ui_hints(choice_style) if manual_results else None,
-        choice_rich_message=_choice_rich_message(message, manual_results) if manual_results else None,
+        choice_rich_message=(
+            _choice_rich_message(
+                message,
+                manual_results,
+                results_verified_by_imdb_id=results_verified_by_imdb_id,
+            )
+            if manual_results
+            else None
+        ),
         query_id=query_id,
         snapshot_status=snapshot_status,
+        imdb_id=imdb_id,
+        media_type=media_type,
+        search_strategy=search_strategy,
+        query_used=query_used,
+        results_verified_by_imdb_id=results_verified_by_imdb_id,
         results=manual_results,
     )
 
@@ -940,10 +962,20 @@ def _candidate_choice_buttons(candidates: list[MovieCandidate]) -> list[ChoiceBu
     ]
 
 
-def _choice_rich_message(message: str, results: list[ManualSearchResult]) -> ChoiceRichMessage:
+def _choice_rich_message(
+    message: str,
+    results: list[ManualSearchResult],
+    *,
+    results_verified_by_imdb_id: bool | None,
+) -> ChoiceRichMessage:
+    html = (
+        render_choice_rich_html(message, results)
+        if results_verified_by_imdb_id is True
+        else render_unverified_choice_rich_html(message, results)
+    )
     return ChoiceRichMessage(
         format="telegram-html",
-        html=render_choice_rich_html(message, results),
+        html=html,
         skip_entity_detection=True,
     )
 
@@ -1025,130 +1057,25 @@ def _result_rank_score(
     return preference_score + min(result.seeders or 0, 99)
 
 
-async def _search_primary(request: SearchRequest, settings: Settings) -> list[SearchResult]:
-    return await search_prowlarr(
-        request.model_copy(update={"indexer_ids": _primary_indexer_ids(settings)}),
-        settings,
-    )
-
-
-async def _search_fallback_and_append(
-    *,
-    query_id: str,
-    base_request: SearchRequest,
-    settings: Settings,
-    store: QuerySnapshotStore,
-    existing_results: list[SearchResult],
-    media_type: MediaType,
-    prefer_premium: bool,
-    requested_resolution: str | None,
-    require_min_seeders: bool,
-) -> list[SearchResult]:
-    fallback_ids = _fallback_indexer_ids(settings)
-    if not fallback_ids:
-        store.append(
-            query_id=query_id,
-            status="not_found",
-            reason="fallback_not_configured",
-            results=existing_results,
-        )
-        return existing_results
-
-    try:
-        fallback_results = await search_prowlarr(
-            base_request.model_copy(update={"indexer_ids": fallback_ids}),
-            settings,
-        )
-    except UpstreamServiceError:
-        logger.warning("Fallback search failed for query_id=%s", query_id)
-        store.append(
-            query_id=query_id,
-            status="fallback_error" if existing_results else "not_found",
-            reason="fallback_error",
-            results=existing_results,
-        )
-        return existing_results
-    merged_results = _rank_results(
-        _merge_results(existing_results, fallback_results),
-        media_type=media_type,
-        prefer_premium=prefer_premium,
-        requested_resolution=requested_resolution,
-        require_min_seeders=require_min_seeders,
-        preferences=_preferences(settings),
-    )
-    store.append(
-        query_id=query_id,
-        status="fallback_ready" if merged_results else "not_found",
-        reason="fallback_results_ready" if merged_results else "fallback_no_results",
-        results=merged_results,
-    )
-    return merged_results
-
-
-def _schedule_fallback_snapshot(
-    background_tasks: BackgroundTasks,
-    *,
-    query_id: str,
-    base_request: SearchRequest,
-    settings: Settings,
-    store: QuerySnapshotStore,
-    existing_results: list[SearchResult],
-    media_type: MediaType,
-    prefer_premium: bool,
-    requested_resolution: str | None,
-) -> None:
-    if not _fallback_indexer_ids(settings):
-        return
-    background_tasks.add_task(
-        _search_fallback_and_append,
-        query_id=query_id,
-        base_request=base_request,
-        settings=settings,
-        store=store,
-        existing_results=existing_results,
-        media_type=media_type,
-        prefer_premium=prefer_premium,
-        requested_resolution=requested_resolution,
-        require_min_seeders=False,
-    )
-
-
-def _merge_results(primary: list[SearchResult], fallback: list[SearchResult]) -> list[SearchResult]:
-    merged: list[SearchResult] = []
-    seen: set[str] = set()
-    for result in [*primary, *fallback]:
-        key = result.download_link.casefold()
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(result)
-    return merged
-
-
 def _snapshot_request_payload(
     *,
     user_message: str,
     search_request: SearchRequest,
     settings: Settings,
     requester_id: str | None,
+    imdb_id: str | None = None,
+    media_type: MediaType | None = None,
 ) -> dict:
+    del settings
     return {
         "input": user_message,
         "requester_id": requester_id,
         "identifier": search_request.identifier,
         "query": search_request.query,
         "categories": search_request.categories,
-        "primary_indexer_ids": _primary_indexer_ids(settings),
-        "fallback_indexer_ids": _fallback_indexer_ids(settings),
+        "imdb_id": imdb_id,
+        "media_type": media_type,
     }
-
-
-def _primary_indexer_ids(settings: Settings) -> list[int] | None:
-    return getattr(settings, "prowlarr_primary_indexer_ids", None)
-
-
-def _fallback_indexer_ids(settings: Settings) -> list[int] | None:
-    return getattr(settings, "prowlarr_fallback_indexer_ids", None)
 
 
 def _query_snapshot_dir(settings: Settings) -> str:

@@ -22,7 +22,10 @@ SERVER_NAME = "mpilot"
 SERVER_INSTRUCTIONS = (
     "Unified MPilot MCP server for media acquisition, subtitle automation, "
     "and cross-tool workflow coordination. Use media_request when the user asks "
-    "to download media and optionally add subtitle processing in one request."
+    "to download media and optionally add subtitle processing in one request. "
+    "For qbot: when acquisition_handle returns action=complementary_search, send its message first and then call "
+    "acquisition_complementary_search with the returned query_id without waiting. Treat exact trimmed Telegram input "
+    "补充搜索 as a control phrase for the active query_id; never pass it to acquisition_handle."
 )
 
 logger = logging.getLogger("mpilot-mcp")
@@ -291,6 +294,9 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
             candidate's imdb_id.
           - "needs_imdb": no title could be identified. Relay the message and
             ask the user to send an IMDb link or ID.
+          - "complementary_search": qbot must first send the returned message
+            to Telegram, then immediately call acquisition_complementary_search
+            with the returned query_id without waiting for another user reply.
 
         Args:
             user_message: Media link, canonical ID, title, season phrase, or
@@ -332,12 +338,29 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
     async def acquisition_get_query_snapshot(query_id: str) -> dict[str, Any]:
         """Return the saved search snapshot for a previous acquisition_handle query_id.
 
-        Use this only when the user asks for more alternatives from the same
-        query. The snapshot may include a later fallback pass from slower
-        indexers. Do not expose raw download_link values unless the user
+        Use this only when the user asks for saved context from the same query.
+        The snapshot may include an independent complementary title/year entry.
+        Do not expose raw download_link values unless the user
         explicitly asks to queue or inspect a specific result.
         """
         return await get_acquisition_client().get_query_snapshot(query_id)
+
+    @mcp.tool()
+    async def acquisition_complementary_search(query_id: str) -> dict[str, Any]:
+        """Run MPilot's manual-only complementary title/year search for an existing query.
+
+        qbot protocol: when acquisition_handle returns action=complementary_search,
+        first send that returned message to Telegram, then call this tool automatically
+        with the same query_id without waiting for user confirmation. Also call this tool
+        when the user enters the exact control phrase 补充搜索 after trimming surrounding
+        whitespace and the current conversation or Topic has an active query_id. Never
+        send 补充搜索 to acquisition_handle. If there is no active query_id, tell the user
+        to search for a movie or show first and do not call either search tool. Render
+        returned choices like normal manual release choices; they are title/year validated
+        candidates and are explicitly not IMDb-ID verified. Never auto-download them.
+        """
+        payload = await get_acquisition_client().complementary_search(query_id)
+        return _prepare_agent_handle_payload(payload)
 
     @mcp.tool()
     async def acquisition_search(

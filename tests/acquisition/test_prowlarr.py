@@ -110,6 +110,7 @@ def _routed_settings():
         prowlarr_imdb_native_indexer_ids=[5, 6],
         prowlarr_imdb_keyword_indexer_ids=[4],
         prowlarr_imdb_disabled_indexer_ids=[1, 3],
+        prowlarr_complementary_indexer_ids=[1, 9],
         imdb_indexer_routing_configured=True,
     )
 
@@ -185,4 +186,9 @@ def test_list_prowlarr_indexers_summarizes_native_and_configured_modes(monkeypat
         (4, False, "keyword"),
         (6, True, "native"),
         (9, False, "unconfigured"),
+    ]
+    assert [(item.id, item.complementary_search_enabled) for item in indexers] == [
+        (4, False),
+        (6, False),
+        (9, True),
     ]

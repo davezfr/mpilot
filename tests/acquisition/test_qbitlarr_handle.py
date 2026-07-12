@@ -45,11 +45,10 @@ def _assert_english_message(payload: dict) -> None:
     assert not CHINESE_TEXT_RE.search(payload["message"])
 
 
-def _settings(tmp_path, *, fallback_indexer_ids: list[int] | None = None):
+def _settings(tmp_path):
     return SimpleNamespace(
         query_snapshot_dir=str(tmp_path),
-        prowlarr_primary_indexer_ids=[10, 20],
-        prowlarr_fallback_indexer_ids=fallback_indexer_ids if fallback_indexer_ids is not None else [1337],
+        prowlarr_complementary_indexer_ids=[],
         qbitlarr_save_path_movie="/downloads/movies",
         qbitlarr_save_path_movie_4k="/downloads/movies-4k",
         qbitlarr_save_path_tv="/downloads/tv",
@@ -189,7 +188,7 @@ def test_handle_keyword_with_multiple_candidates_returns_choose_title(monkeypatc
 
     monkeypatch.setattr("mpilot.api.handle.search_movie_candidates", fake_candidates)
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", unexpected_search_prowlarr)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
     monkeypatch.setattr("mpilot.api.handle.create_query_id", lambda: "query-titles")
 
     client = TestClient(app)
@@ -247,7 +246,7 @@ def test_handle_keyword_with_single_candidate_passes_through_to_release_search(m
     monkeypatch.setattr("mpilot.api.handle.search_movie_candidates", fake_candidates)
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "Shawshank Redemption"})
@@ -268,7 +267,7 @@ def test_handle_keyword_with_no_candidates_asks_for_imdb(monkeypatch, tmp_path):
 
     monkeypatch.setattr("mpilot.api.handle.search_movie_candidates", fake_candidates)
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", unexpected_search_prowlarr)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
     monkeypatch.setattr("mpilot.api.handle.create_query_id", lambda: "query-needs-imdb")
 
     client = TestClient(app)
@@ -292,7 +291,7 @@ def test_handle_keyword_choose_title_writes_title_candidates_snapshot(monkeypatc
         ]
 
     monkeypatch.setattr("mpilot.api.handle.search_movie_candidates", fake_candidates)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
     monkeypatch.setattr("mpilot.api.handle.create_query_id", lambda: "query-titles-snapshot")
 
     client = TestClient(app)
@@ -311,7 +310,7 @@ def test_get_query_snapshot_endpoint_returns_saved_snapshot(monkeypatch, tmp_pat
     store.create(
         query_id="query-read",
         request={"input": "The Hitch-Hiker", "categories": [2040]},
-        status="primary_ready",
+        status="imdb_ready",
         reason="primary_results_ready",
         results=[_result("The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GRP", seeders=50)],
     )
@@ -342,7 +341,7 @@ def test_handle_keyword_passthrough_preserves_premium_quality_request(monkeypatc
     monkeypatch.setattr("mpilot.api.handle.search_movie_candidates", fake_candidates)
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "The Hitch-Hiker 4K Remux"})
@@ -371,7 +370,7 @@ def test_handle_imdb_id_auto_downloads_best_movie_to_movie_path(monkeypatch, tmp
 
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "tt0045877", "user_id": "telegram:123456789"})
@@ -410,7 +409,7 @@ def test_handle_imdb_id_auto_downloads_4k_movie_to_4k_movie_path(monkeypatch, tm
 
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "tt0045877 4K"})
@@ -437,7 +436,7 @@ def test_handle_imdb_id_auto_downloads_tv_to_tv_path(monkeypatch, tmp_path):
 
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "tt0017925"})
@@ -463,7 +462,7 @@ def test_handle_imdb_id_save_path_override_takes_precedence(monkeypatch, tmp_pat
 
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post(
@@ -498,7 +497,7 @@ def test_handle_imdb_id_auto_download_message_uses_selected_seeders_not_transien
 
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "tt0045877"})
@@ -555,7 +554,7 @@ def test_handle_imdb_id_never_refines_by_title_before_auto_download(monkeypatch,
 
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "tt0045877"})
@@ -590,7 +589,7 @@ def test_handle_imdb_id_uses_torrent_metadata_title_for_auto_selection(monkeypat
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle._get_torrent_metadata_title", fake_torrent_metadata_title, raising=False)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "tt0045877"})
@@ -666,7 +665,7 @@ def test_handle_imdb_id_returns_existing_matching_download_without_readding(monk
     monkeypatch.setattr("mpilot.api.handle.list_downloads_from_qbittorrent", fake_list_downloads, raising=False)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
     monkeypatch.setattr("mpilot.api.handle.tag_download_for_requester", fake_tag_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "tt0045877", "user_id": "telegram:123456789"})
@@ -698,7 +697,7 @@ def test_handle_imdb_shared_url_searches_embedded_id_as_keyword(monkeypatch, tmp
 
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post(
@@ -734,7 +733,7 @@ def test_handle_douban_movie_url_resolves_to_imdb_and_auto_downloads(monkeypatch
     monkeypatch.setattr("mpilot.api.handle.resolve_external_movie_id", fake_resolve_external_movie_id, raising=False)
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "https://movie.douban.com/subject/1292052/"})
@@ -766,7 +765,7 @@ def test_handle_allocine_movie_url_unresolved_asks_for_imdb(monkeypatch, tmp_pat
 
     monkeypatch.setattr("mpilot.api.handle.resolve_external_movie_id", fake_resolve_external_movie_id, raising=False)
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", unexpected_search_prowlarr)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
     monkeypatch.setattr("mpilot.api.handle.create_query_id", lambda: "query-allocine-unresolved")
 
     client = TestClient(app)
@@ -796,7 +795,7 @@ def test_handle_keyword_choose_title_label_falls_back_to_title_without_year(monk
         ]
 
     monkeypatch.setattr("mpilot.api.handle.search_movie_candidates", fake_candidates)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "untitled doc"})
@@ -826,7 +825,7 @@ def test_handle_imdb_id_returns_manual_list_when_no_result_meets_seed_threshold(
 
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fail_if_downloaded)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "tt0017925"})
@@ -843,7 +842,7 @@ def test_handle_imdb_id_returns_manual_list_when_no_result_meets_seed_threshold(
 
 
 def _settings_with_prefs(tmp_path, **overrides):
-    base = _settings(tmp_path, fallback_indexer_ids=[])
+    base = _settings(tmp_path)
     defaults = {
         "prefer_resolution": "1080p",
         "prefer_source": "WEB-DL",
@@ -1157,6 +1156,39 @@ def test_render_choice_table_aligns_columns_and_marks_recommended():
     assert "12.5GB" in lines[2]
 
 
+def test_render_unverified_choice_table_keeps_full_title_and_indexer():
+    from mpilot.acquisition.domain.choice_table import render_unverified_choice_table
+    from mpilot.acquisition.models import ManualSearchResult
+
+    results = [
+        ManualSearchResult(
+            index=1,
+            title="Sarajevo.Safari.2022.1080p.HDTV.x264",
+            quality="1080p HDTV H.264",
+            seeders=1,
+            size=3_100_000_000,
+            download_link="https://example.test/1.torrent",
+            indexer="RuTracker",
+        ),
+        ManualSearchResult(
+            index=2,
+            title="Sarajevo.Safari.2022.SLO.1080p.HDTV.x264",
+            quality="1080p HDTV H.264",
+            seeders=1,
+            size=2_100_000_000,
+            download_link="https://example.test/2.torrent",
+            indexer="52BT",
+        ),
+    ]
+
+    assert render_unverified_choice_table(results) == (
+        "1. Sarajevo.Safari.2022.1080p.HDTV.x264\n"
+        "   HDTV · H.264 · 🧲 1 · 💾 3.1GB · RuTracker\n\n"
+        "2. Sarajevo.Safari.2022.SLO.1080p.HDTV.x264\n"
+        "   HDTV · H.264 · 🧲 1 · 💾 2.1GB · 52BT"
+    )
+
+
 def test_handle_imdb_show_results_includes_choices_table(monkeypatch, tmp_path):
     async def fake_search_prowlarr(request, settings):
         return [
@@ -1347,7 +1379,7 @@ def test_handle_keyword_choose_title_uses_title_choice_table(monkeypatch, tmp_pa
         ]
 
     monkeypatch.setattr("mpilot.api.handle.search_movie_candidates", fake_candidates)
-    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path, fallback_indexer_ids=[]))
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
 
     client = TestClient(app)
     response = client.post("/handle", json={"user_message": "Parasite"})

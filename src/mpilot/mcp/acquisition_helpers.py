@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from mpilot.acquisition.domain.choice_table import render_choice_table, render_title_choice_table
+from mpilot.acquisition.domain.choice_table import (
+    render_choice_table,
+    render_title_choice_table,
+    render_unverified_choice_table,
+)
 from mpilot.acquisition.models import ManualSearchResult, MovieCandidate
 from mpilot.core.targets import resolve_notification_target
 from mpilot.mcp.acquisition_notifications import DownloadCompletionNotifier
@@ -87,7 +91,10 @@ def _prepare_agent_handle_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def _agent_clarify_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
     action = payload.get("action")
     if action == "show_results":
-        display_table, response_mapping = _release_clarify_display(payload.get("results"))
+        display_table, response_mapping = _release_clarify_display(
+            payload.get("results"),
+            results_verified_by_imdb_id=payload.get("results_verified_by_imdb_id") is True,
+        )
         question = "Choose a version to download:"
     elif action == "choose_title":
         display_table, response_mapping = _title_clarify_display(payload.get("candidates"))
@@ -108,7 +115,11 @@ def _agent_clarify_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
     return clarify_payload
 
 
-def _release_clarify_display(results: Any) -> tuple[str | None, list[dict[str, Any]]]:
+def _release_clarify_display(
+    results: Any,
+    *,
+    results_verified_by_imdb_id: bool,
+) -> tuple[str | None, list[dict[str, Any]]]:
     manual_results: list[ManualSearchResult] = []
     response_mapping: list[dict[str, Any]] = []
     if not isinstance(results, list):
@@ -129,6 +140,7 @@ def _release_clarify_display(results: Any) -> tuple[str | None, list[dict[str, A
                 seeders=result.get("seeders") if isinstance(result.get("seeders"), int) else None,
                 size=result.get("size") if isinstance(result.get("size"), int) else None,
                 download_link=_string_value(result.get("download_link")) or "",
+                indexer=_string_value(result.get("indexer")),
                 label=_string_value(result.get("label")),
             )
         )
@@ -138,7 +150,12 @@ def _release_clarify_display(results: Any) -> tuple[str | None, list[dict[str, A
 
     if not manual_results:
         return None, response_mapping
-    return render_choice_table(manual_results), response_mapping
+    display_table = (
+        render_choice_table(manual_results)
+        if results_verified_by_imdb_id
+        else render_unverified_choice_table(manual_results)
+    )
+    return display_table, response_mapping
 
 
 def _title_clarify_display(candidates: Any) -> tuple[str | None, list[dict[str, Any]]]:

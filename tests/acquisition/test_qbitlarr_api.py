@@ -108,12 +108,14 @@ def test_settings_loads_imdb_indexer_search_mode_lists(monkeypatch):
     monkeypatch.setenv("MPILOT_PROWLARR_IMDB_NATIVE_INDEXER_IDS", "5,6")
     monkeypatch.setenv("MPILOT_PROWLARR_IMDB_KEYWORD_INDEXER_IDS", "4")
     monkeypatch.setenv("MPILOT_PROWLARR_IMDB_DISABLED_INDEXER_IDS", "1,3")
+    monkeypatch.setenv("MPILOT_PROWLARR_COMPLEMENTARY_INDEXER_IDS", "1,3,8,9")
 
     settings = Settings.from_env()
 
     assert settings.prowlarr_imdb_native_indexer_ids == [5, 6]
     assert settings.prowlarr_imdb_keyword_indexer_ids == [4]
     assert settings.prowlarr_imdb_disabled_indexer_ids == [1, 3]
+    assert settings.prowlarr_complementary_indexer_ids == [1, 3, 8, 9]
     assert settings.imdb_indexer_routing_configured is True
 
 
@@ -420,14 +422,14 @@ def test_query_snapshot_store_prunes_old_snapshots(tmp_path):
     store.create(
         query_id="old-query",
         request={"input": "old"},
-        status="primary_ready",
+        status="imdb_ready",
         reason="primary_results_ready",
         results=[],
     )
     store.create(
         query_id="new-query",
         request={"input": "new"},
-        status="primary_ready",
+        status="imdb_ready",
         reason="primary_results_ready",
         results=[],
     )
@@ -454,14 +456,14 @@ def test_query_snapshot_store_prune_skips_invalid_timestamp_and_prunes_other_sna
     store.create(
         query_id="old-query",
         request={"input": "old"},
-        status="primary_ready",
+        status="imdb_ready",
         reason="primary_results_ready",
         results=[],
     )
     store.create(
         query_id="new-query",
         request={"input": "new"},
-        status="primary_ready",
+        status="imdb_ready",
         reason="primary_results_ready",
         results=[],
     )
@@ -880,7 +882,7 @@ def test_download_endpoint_uses_query_context_to_keep_manual_selection_in_tv_pat
     QuerySnapshotStore(str(tmp_path)).create(
         query_id="query-tv-manual",
         request={"input": "tt0017925", "query": "tt0017925", "requester_id": "telegram:123456789"},
-        status="primary_ready",
+        status="imdb_ready",
         reason="primary_results_ready",
         results=[
             {
@@ -1130,8 +1132,9 @@ def test_prowlarr_indexers_endpoint_returns_discoverable_indexer_ids(monkeypatch
             "name": "Trusted Indexer",
             "enabled": True,
             "protocol": "torrent",
-            "supports_imdb_parameter": False,
-            "imdb_search_mode": "unconfigured",
+                "supports_imdb_parameter": False,
+                "imdb_search_mode": "unconfigured",
+                "complementary_search_enabled": False,
         }
     ]
 
@@ -1388,7 +1391,8 @@ def test_mcp_mount_exposes_acquisition_operations():
     assert handle_operation["operationId"] == "acquisition_handle"
     assert snapshot_operation["operationId"] == "acquisition_get_query_snapshot"
     assert acquisition_operations == {
-        "acquisition_download",
+            "acquisition_download",
+            "acquisition_complementary_search",
         "acquisition_delete_download",
         "acquisition_get_download_status",
         "acquisition_get_query_snapshot",

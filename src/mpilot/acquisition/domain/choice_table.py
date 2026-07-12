@@ -56,6 +56,17 @@ def render_choice_table(results: list[ManualSearchResult]) -> str:
     return "\n".join(lines)
 
 
+def render_unverified_choice_table(results: list[ManualSearchResult]) -> str:
+    """Render title-visible choices when the media identity is not IMDb-verified."""
+    blocks = []
+    for result in results:
+        blocks.append(
+            f"{result.index}. {_single_line(result.title)}\n"
+            f"   {_unverified_choice_details(result)}"
+        )
+    return "\n\n".join(blocks)
+
+
 def render_choice_rich_html(message: str, results: list[ManualSearchResult]) -> str:
     """Render release choices as Telegram rich-message HTML.
 
@@ -94,6 +105,16 @@ def render_choice_rich_html(message: str, results: list[ManualSearchResult]) -> 
     )
 
 
+def render_unverified_choice_rich_html(message: str, results: list[ManualSearchResult]) -> str:
+    """Render title-visible rich choices when the media identity is uncertain."""
+    choices = "".join(
+        f"<p><b>{result.index}. {escape(_single_line(result.title))}</b><br>"
+        f"{escape(_unverified_choice_details(result))}</p>"
+        for result in results
+    )
+    return f"<p><b>{escape(message)}</b></p>{choices}"
+
+
 def render_title_choice_table(candidates: list[MovieCandidate]) -> str:
     """Render a monospace title-choice list for ambiguous keyword matches."""
     return "\n".join(f"{candidate.index}. {candidate.label}" for candidate in candidates)
@@ -127,6 +148,19 @@ def render_title_choice_rich_html(message: str, candidates: list[MovieCandidate]
 
 def _center(value: str, width: int) -> str:
     return value.center(width)
+
+
+def _unverified_choice_details(result: ManualSearchResult) -> str:
+    parsed = parse_quality(result.title)
+    source = "REMUX" if parsed.is_remux and parsed.source in {None, "BluRay"} else (parsed.source or MISSING)
+    codec = parsed.codec or MISSING
+    seeders = str(result.seeders) if result.seeders is not None else MISSING
+    indexer = _single_line(result.indexer) if result.indexer else MISSING
+    return f"{source} · {codec} · {SEEDERS_EMOJI} {seeders} · {SIZE_EMOJI} {_compact_size(result.size)} · {indexer}"
+
+
+def _single_line(value: str) -> str:
+    return " ".join(value.split())
 
 
 def _compact_size(size: int | None) -> str:

@@ -154,6 +154,7 @@ MPILOT_ACQUISITION_SAVE_PATH_TV=/downloads/tv
 MPILOT_PROWLARR_IMDB_NATIVE_INDEXER_IDS=5,6
 MPILOT_PROWLARR_IMDB_KEYWORD_INDEXER_IDS=4
 MPILOT_PROWLARR_IMDB_DISABLED_INDEXER_IDS=1,3
+MPILOT_PROWLARR_COMPLEMENTARY_INDEXER_IDS=
 ```
 
 MPilot keeps IMDb acquisition ID-only while adapting the request to each
@@ -163,6 +164,12 @@ recorded but skipped. Once any of these three lists is configured, a newly
 added Prowlarr indexer is reported as `unconfigured` and is not used for IMDb
 requests until you classify it. This prevents a new source from silently
 receiving the wrong query form.
+
+Complementary title search is configured independently with
+`MPILOT_PROWLARR_COMPLEMENTARY_INDEXER_IDS`. It runs only after a successful
+zero-result IMDb pass or an explicit qbot `补充搜索` control phrase, derives a
+canonical `title + year` query from Wikidata, and always returns manual choices.
+Indexer IDs are installation-specific, so the public default is empty.
 
 Run `mpilot acquisition indexers` (or call `acquisition_list_indexers`) to see
 the central summary. Each row includes the effective `imdb_search_mode` and

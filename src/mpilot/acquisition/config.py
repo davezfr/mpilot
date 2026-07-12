@@ -34,11 +34,10 @@ class Settings:
     qbit_password: str
     request_timeout_seconds: float = 30.0
     query_snapshot_dir: str = "data/query-snapshots"
-    prowlarr_primary_indexer_ids: list[int] | None = None
-    prowlarr_fallback_indexer_ids: list[int] | None = None
     prowlarr_imdb_native_indexer_ids: list[int] | None = None
     prowlarr_imdb_keyword_indexer_ids: list[int] | None = None
     prowlarr_imdb_disabled_indexer_ids: list[int] | None = None
+    prowlarr_complementary_indexer_ids: list[int] | None = None
     qbitlarr_api_key: str | None = None
     qbitlarr_save_path_movie: str = "/downloads/movies"
     qbitlarr_save_path_movie_4k: str = "/downloads/movies-4k"
@@ -109,11 +108,10 @@ class Settings:
             qbit_password=_required_env("QBIT_PASSWORD"),
             request_timeout_seconds=float(_env_with_default("REQUEST_TIMEOUT_SECONDS", "30")),
             query_snapshot_dir=_env_with_default("QBITLARR_QUERY_SNAPSHOT_DIR", "data/query-snapshots"),
-            prowlarr_primary_indexer_ids=_optional_int_list("PROWLARR_PRIMARY_INDEXER_IDS"),
-            prowlarr_fallback_indexer_ids=_optional_int_list("PROWLARR_FALLBACK_INDEXER_IDS"),
             prowlarr_imdb_native_indexer_ids=_optional_int_list("PROWLARR_IMDB_NATIVE_INDEXER_IDS"),
             prowlarr_imdb_keyword_indexer_ids=_optional_int_list("PROWLARR_IMDB_KEYWORD_INDEXER_IDS"),
             prowlarr_imdb_disabled_indexer_ids=_optional_int_list("PROWLARR_IMDB_DISABLED_INDEXER_IDS"),
+            prowlarr_complementary_indexer_ids=_optional_int_list("PROWLARR_COMPLEMENTARY_INDEXER_IDS"),
             qbitlarr_api_key=_optional_str_env("QBITLARR_API_KEY"),
             qbitlarr_save_path_movie=_env_with_default("QBITLARR_SAVE_PATH_MOVIE", "/downloads/movies"),
             qbitlarr_save_path_movie_4k=_env_with_default("QBITLARR_SAVE_PATH_MOVIE_4K", "/downloads/movies-4k"),

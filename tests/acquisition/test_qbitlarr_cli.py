@@ -98,7 +98,7 @@ class FakeClient:
 
     async def get_query_snapshot(self, query_id):
         self.calls.append(("snapshot", {"query_id": query_id}))
-        return {"query_id": query_id, "status": "fallback_ready"}
+        return {"query_id": query_id, "status": "complementary_ready"}
 
 
 def _run_cli(argv, fake_client: FakeClient):
@@ -404,7 +404,7 @@ def test_cli_snapshot_reads_saved_query_snapshot():
     result = _run_cli(["snapshot", "query-123"], fake_client)
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["status"] == "fallback_ready"
+    assert json.loads(result.stdout)["status"] == "complementary_ready"
     assert fake_client.calls == [("snapshot", {"query_id": "query-123"})]
 
 

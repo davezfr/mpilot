@@ -12,6 +12,7 @@ def test_agent_handle_payload_for_release_choices_uses_clarify_safe_fields():
     payload = {
         "status": "success",
         "action": "show_results",
+        "results_verified_by_imdb_id": True,
         "message": "Here are the top results, please reply with the number:",
         "choices_table": "1.  WEBRip  H.265  🧲 3635  💾 1.8GB",
         "choice_display": "Here are the top results\n\n```text\n1.  WEBRip  H.265  🧲 3635  💾 1.8GB\n```",
@@ -68,6 +69,7 @@ def test_agent_handle_payload_caps_release_table_for_hermes_clarify():
     payload = {
         "status": "success",
         "action": "show_results",
+        "results_verified_by_imdb_id": True,
         "message": "Here are the top results, please reply with the number:",
         "results": [
             {
@@ -94,6 +96,53 @@ def test_agent_handle_payload_caps_release_table_for_hermes_clarify():
         {"choice": "2", "response": "2", "index": 2},
         {"choice": "3", "response": "3", "index": 3},
         {"choice": "4", "response": "4", "index": 4},
+    ]
+
+
+def test_agent_handle_payload_for_unverified_results_keeps_title_and_indexer():
+    payload = {
+        "status": "success",
+        "action": "show_results",
+        "results_verified_by_imdb_id": False,
+        "message": "These results are not IMDb-verified.",
+        "choice_buttons": [
+            {"index": 1, "text": "1", "value": "1"},
+            {"index": 2, "text": "2", "value": "2"},
+        ],
+        "results": [
+            {
+                "index": 1,
+                "title": "Sarajevo.Safari.2022.1080p.HDTV.x264",
+                "quality": "1080p HDTV H.264",
+                "seeders": 1,
+                "size": 3_100_000_000,
+                "download_link": "https://example.test/1.torrent",
+                "indexer": "RuTracker",
+            },
+            {
+                "index": 2,
+                "title": "Sarajevo.Safari.2022.SLO.1080p.HDTV.x264",
+                "quality": "1080p HDTV H.264",
+                "seeders": 1,
+                "size": 2_100_000_000,
+                "download_link": "https://example.test/2.torrent",
+                "indexer": "52BT",
+            },
+        ],
+    }
+
+    agent_payload = _prepare_agent_handle_payload(payload)
+
+    assert agent_payload["agent_clarify"]["display_table"] == (
+        "1. Sarajevo.Safari.2022.1080p.HDTV.x264\n"
+        "   HDTV · H.264 · 🧲 1 · 💾 3.1GB · RuTracker\n\n"
+        "2. Sarajevo.Safari.2022.SLO.1080p.HDTV.x264\n"
+        "   HDTV · H.264 · 🧲 1 · 💾 2.1GB · 52BT"
+    )
+    assert agent_payload["agent_clarify"]["choices"] == ["1", "2"]
+    assert agent_payload["agent_clarify"]["response_mapping"] == [
+        {"choice": "1", "response": "1", "index": 1},
+        {"choice": "2", "response": "2", "index": 2},
     ]
 
 
@@ -641,27 +690,27 @@ def test_qbitlarr_api_client_get_query_snapshot_gets_query_endpoint():
             200,
             json={
                 "query_id": "query-123",
-                "status": "fallback_ready",
+                "status": "complementary_ready",
                 "created_at": "2026-05-27T12:00:00Z",
                 "updated_at": "2026-05-27T12:00:40Z",
                 "request": {"input": "Rare Movie"},
                 "snapshots": [
                     {
                         "version": 1,
-                        "reason": "primary_no_results",
+                        "reason": "imdb_no_results",
                         "created_at": "2026-05-27T12:00:30Z",
                         "results": [],
                     },
                     {
                         "version": 2,
-                        "reason": "fallback_results_ready",
+                        "reason": "complementary_results_ready",
                         "created_at": "2026-05-27T12:00:40Z",
                         "results": [
                             {
                                 "title": "Rare.Movie.1080p.WEB-DL.H.264-GRP",
                                 "download_link": "https://example.test/rare.torrent",
                                 "seeders": 12,
-                                "indexer": "Fallback Indexer",
+                                "indexer": "Complementary Indexer",
                             }
                         ],
                     },
@@ -676,8 +725,8 @@ def test_qbitlarr_api_client_get_query_snapshot_gets_query_endpoint():
 
     snapshot = asyncio.run(client.get_query_snapshot("query-123"))
 
-    assert snapshot["status"] == "fallback_ready"
-    assert snapshot["snapshots"][-1]["results"][0]["indexer"] == "Fallback Indexer"
+    assert snapshot["status"] == "complementary_ready"
+    assert snapshot["snapshots"][-1]["results"][0]["indexer"] == "Complementary Indexer"
 
 
 def test_qbitlarr_api_client_raises_clean_error_for_qbitlarr_failures():

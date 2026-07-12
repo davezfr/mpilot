@@ -16,6 +16,7 @@ from fastapi_mcp import FastApiMCP
 from starlette.responses import JSONResponse
 
 from mpilot.api.download import router as download_router
+from mpilot.api.complementary_search import router as complementary_search_router
 from mpilot.api.downloads_list import router as downloads_list_router
 from mpilot.api.handle import get_categories, router as handle_router
 from mpilot.api.prowlarr import router as prowlarr_router
@@ -189,6 +190,7 @@ app.include_router(downloads_list_router)
 app.include_router(handle_router)
 app.include_router(prowlarr_router)
 app.include_router(query_snapshots_router)
+app.include_router(complementary_search_router)
 
 
 @app.get(
@@ -233,6 +235,7 @@ async def health(deep: bool = False):
 
 
 ACQUISITION_MCP_OPERATIONS = [
+    "acquisition_complementary_search",
     "acquisition_delete_download",
     "acquisition_download",
     "acquisition_get_download_status",

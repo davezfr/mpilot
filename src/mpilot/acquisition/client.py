@@ -181,6 +181,12 @@ class AcquisitionApiClient:
             raise AcquisitionApiError("MPilot acquisition API returned an unexpected query snapshot response")
         return response
 
+    async def complementary_search(self, query_id: str) -> dict[str, Any]:
+        response = await self._request("POST", f"/queries/{query_id}/complementary-search")
+        if not isinstance(response, dict):
+            raise AcquisitionApiError("MPilot acquisition API returned an unexpected complementary search response")
+        return response
+
     async def list_prowlarr_indexers(self) -> list[dict[str, Any]]:
         response = await self._request("GET", "/prowlarr/indexers")
         if not isinstance(response, list):

@@ -152,6 +152,8 @@ async def list_prowlarr_indexers(settings: Settings) -> list[ProwlarrIndexer]:
                 protocol=_optional_str(item.get("protocol")),
                 supports_imdb_parameter=_supports_imdb_parameter(item),
                 imdb_search_mode=_configured_imdb_search_mode(int(item["id"]), settings),
+                complementary_search_enabled=int(item["id"])
+                in (getattr(settings, "prowlarr_complementary_indexer_ids", None) or []),
             )
         )
     return indexers

@@ -9,6 +9,7 @@ import httpx
 
 from mpilot.acquisition.config import Settings
 from mpilot.acquisition.domain.quality import extract_external_movie_id, normalize_user_message
+from mpilot.acquisition.exceptions import UpstreamServiceError
 
 
 logger = logging.getLogger("qbitlarr-api.wikidata")
@@ -28,6 +29,7 @@ MOVIE_CANDIDATE_ROW_LIMIT = 30
 # Only surface items that are (a subclass of) a film, TV series, or TV film, so
 # entity search cannot hand back individual episodes or specials as candidates.
 MOVIE_CANDIDATE_TYPE_QIDS = ("Q11424", "Q5398426", "Q506240")
+TV_TYPE_QIDS = {"Q5398426"}
 
 # A trailing release year (e.g. "Parasite 2019") defeats Wikidata's label-based
 # entity search. It is stripped only as a retry when the verbatim query finds
@@ -101,6 +103,64 @@ async def search_movie_candidates(
     return candidates
 
 
+async def resolve_imdb_metadata(imdb_id: str, settings: Settings) -> dict[str, Any] | None:
+    """Resolve canonical English title, year, and media type for an IMDb title ID."""
+    normalized = imdb_id.strip().lower()
+    if not re.fullmatch(r"tt\d{6,12}", normalized):
+        return None
+
+    type_values = " ".join(f"wd:{qid}" for qid in MOVIE_CANDIDATE_TYPE_QIDS)
+    query = (
+        "SELECT ?item ?itemLabel ?year ?type WHERE { "
+        f'?item wdt:P345 "{normalized}" . '
+        "?item wdt:P31/wdt:P279* ?type . "
+        f"VALUES ?type {{ {type_values} }} "
+        "OPTIONAL { ?item wdt:P577 ?date . BIND(YEAR(?date) AS ?year) } "
+        'SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . } '
+        "} ORDER BY ?year LIMIT 20"
+    )
+    return _parse_imdb_metadata(await _run_sparql(query, settings, raise_on_error=True), imdb_id=normalized)
+
+
+def _parse_imdb_metadata(payload: dict[str, Any] | None, *, imdb_id: str) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    results = payload.get("results")
+    bindings = results.get("bindings") if isinstance(results, dict) else None
+    if not isinstance(bindings, list):
+        return None
+
+    title: str | None = None
+    qid: str | None = None
+    years: list[int] = []
+    media_type = "movie"
+    for binding in bindings:
+        if not isinstance(binding, dict):
+            continue
+        candidate_qid = _wikidata_qid(_binding_value(binding.get("item")))
+        candidate_title = _binding_value(binding.get("itemLabel"))
+        if candidate_title and candidate_title != candidate_qid:
+            title = title or candidate_title
+        qid = qid or candidate_qid
+        year = _parse_year(_binding_value(binding.get("year")))
+        if year is not None:
+            years.append(year)
+        type_qid = _wikidata_qid(_binding_value(binding.get("type")))
+        if type_qid in TV_TYPE_QIDS:
+            media_type = "tv"
+
+    if not title or not years:
+        return None
+    return {
+        "imdb_id": imdb_id,
+        "canonical_title": title,
+        "year": min(years),
+        "media_type": media_type,
+        "metadata_source": "wikidata",
+        "wikidata_qid": qid,
+    }
+
+
 async def _query_wikidata_imdb(
     *,
     property_id: str,
@@ -117,7 +177,12 @@ async def _query_wikidata_imdb(
     return await _run_sparql(query, settings)
 
 
-async def _run_sparql(query: str, settings: Settings) -> dict[str, Any] | None:
+async def _run_sparql(
+    query: str,
+    settings: Settings,
+    *,
+    raise_on_error: bool = False,
+) -> dict[str, Any] | None:
     headers = {
         "Accept": "application/sparql-results+json",
         "User-Agent": "qBitlarr/0.1 (external-movie-resolver)",
@@ -131,15 +196,23 @@ async def _run_sparql(query: str, settings: Settings) -> dict[str, Any] | None:
             payload = response.json()
     except httpx.HTTPStatusError as exc:
         logger.warning("Wikidata query failed with HTTP %s", exc.response.status_code)
+        if raise_on_error:
+            raise UpstreamServiceError(f"Wikidata query failed with HTTP {exc.response.status_code}") from exc
         return None
     except httpx.RequestError as exc:
         logger.warning("Wikidata query failed: %s", exc.__class__.__name__)
+        if raise_on_error:
+            raise UpstreamServiceError("Wikidata is unreachable") from exc
         return None
     except ValueError:
         logger.warning("Wikidata returned invalid JSON")
+        if raise_on_error:
+            raise UpstreamServiceError("Wikidata returned invalid JSON")
         return None
 
     if not isinstance(payload, dict):
+        if raise_on_error:
+            raise UpstreamServiceError("Wikidata returned an unexpected response shape")
         return None
     return payload
 

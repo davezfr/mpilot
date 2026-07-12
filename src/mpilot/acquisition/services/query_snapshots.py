@@ -35,6 +35,7 @@ class QuerySnapshotStore:
         status: str,
         reason: str,
         results: list[SearchResult],
+        metadata: dict[str, Any] | None = None,
     ) -> QuerySnapshot:
         now = utc_now()
         snapshot = QuerySnapshot(
@@ -49,6 +50,7 @@ class QuerySnapshotStore:
                     reason=reason,
                     created_at=now,
                     results=results,
+                    metadata=metadata or {},
                 )
             ],
         )
@@ -62,6 +64,7 @@ class QuerySnapshotStore:
         status: str,
         reason: str,
         results: list[SearchResult],
+        metadata: dict[str, Any] | None = None,
     ) -> QuerySnapshot:
         snapshot = self.read(query_id)
         now = utc_now()
@@ -73,6 +76,7 @@ class QuerySnapshotStore:
                 reason=reason,
                 created_at=now,
                 results=results,
+                metadata=metadata or {},
             )
         )
         self.write(snapshot)

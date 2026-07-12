@@ -20,11 +20,13 @@ class FakeFastMCP:
         self.instructions = instructions
         self.tool_names = []
         self.tool_docs = {}
+        self.tool_functions = {}
 
     def tool(self):
         def decorator(func):
             self.tool_names.append(func.__name__)
             self.tool_docs[func.__name__] = func.__doc__ or ""
+            self.tool_functions[func.__name__] = func
             return func
 
         return decorator
@@ -58,6 +60,10 @@ class FakeAcquisitionClient:
         self.calls.append(kwargs)
         return dict(self.payload)
 
+    async def complementary_search(self, query_id):
+        self.calls.append({"query_id": query_id})
+        return dict(self.payload)
+
 
 class UnifiedMcpServerTests(unittest.TestCase):
     def test_create_mcp_server_registers_full_tool_union_when_configured(self):
@@ -75,6 +81,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
         self.assertTrue(
             {
                 "acquisition_handle",
+                "acquisition_complementary_search",
                 "acquisition_download",
                 "job_create",
                 "job_start",
@@ -96,6 +103,10 @@ class UnifiedMcpServerTests(unittest.TestCase):
         self.assertNotIn("record_qbitlarr_download_with_subtitle_intent", server.tool_names)
         self.assertIn("agent_clarify.display_table", server.tool_docs["acquisition_handle"])
         self.assertIn("acquisition_download", server.tool_docs["acquisition_handle"])
+        self.assertIn("qbot protocol", server.tool_docs["acquisition_complementary_search"])
+        self.assertIn("补充搜索", server.tool_docs["acquisition_complementary_search"])
+        self.assertIn("there is no active query_id", server.tool_docs["acquisition_complementary_search"])
+        self.assertIn("Never", server.tool_docs["acquisition_complementary_search"])
         self.assertIn("rendered_status", server.tool_docs["acquisition_download"])
         self.assertIn("requester_id is required", server.tool_docs["acquisition_delete_download"])
 
@@ -103,6 +114,7 @@ class UnifiedMcpServerTests(unittest.TestCase):
         server = _create_server_with_env({"QBITLARR_API_URL": "http://127.0.0.1:1"})
 
         self.assertIn("acquisition_handle", server.tool_names)
+        self.assertIn("acquisition_complementary_search", server.tool_names)
         self.assertIn("media_request", server.tool_names)
         self.assertNotIn("queue_status", server.tool_names)
         self.assertNotIn("workflow_show", server.tool_names)
@@ -118,6 +130,39 @@ class UnifiedMcpServerTests(unittest.TestCase):
         self.assertNotIn("queue_status", server.tool_names)
         self.assertNotIn("media_request", server.tool_names)
         self.assertNotIn("acquisition_handle", server.tool_names)
+
+    def test_complementary_search_tool_prepares_numeric_clarify_choices(self):
+        client = FakeAcquisitionClient(
+            {
+                "status": "success",
+                "action": "show_results",
+                "results_verified_by_imdb_id": False,
+                "message": "Not IMDb-verified.",
+                "choice_buttons": [{"index": 1, "text": "1", "value": "1"}],
+                "results": [
+                    {
+                        "index": 1,
+                        "title": "Sarajevo.Safari.2022.1080p.HDTV.x264",
+                        "quality": "1080p HDTV H.264",
+                        "seeders": 1,
+                        "size": 3_100_000_000,
+                        "download_link": "https://example.test/1.torrent",
+                        "indexer": "RuTracker",
+                    }
+                ],
+            }
+        )
+        server = FakeFastMCP("mpilot")
+
+        with patch.object(unified, "get_acquisition_client", return_value=client):
+            unified._register_acquisition_tools(server, FakeNotifier())
+            payload = asyncio.run(server.tool_functions["acquisition_complementary_search"]("query-123"))
+
+        self.assertEqual(client.calls, [{"query_id": "query-123"}])
+        self.assertEqual(payload["agent_clarify"]["choices"], ["1"])
+        self.assertIn("Sarajevo.Safari.2022.1080p.HDTV.x264", payload["agent_clarify"]["display_table"])
+        self.assertIn("RuTracker", payload["agent_clarify"]["display_table"])
+        self.assertNotIn("choice_buttons", payload)
 
     def test_operator_and_destructive_tools_require_explicit_opt_in(self):
         server = _create_server_with_env(
