@@ -137,6 +137,22 @@ def test_search_prowlarr_routes_exact_imdb_id_by_configured_indexer_mode(monkeyp
     }
 
 
+def test_search_prowlarr_uses_tvsearch_for_canonical_tv_imdb(monkeypatch):
+    RecordingAsyncClient.calls = []
+    monkeypatch.setattr("mpilot.acquisition.services.prowlarr.httpx.AsyncClient", RecordingAsyncClient)
+
+    asyncio.run(
+        search_prowlarr(
+            SearchRequest(query="tt7587282", categories=[5000], media_type="tv"),
+            _routed_settings(),
+        )
+    )
+
+    params = [call["params"] for call in RecordingAsyncClient.calls]
+    assert {item["type"] for item in params} == {"search", "tvsearch"}
+    assert all(item["categories"] == [5000] for item in params)
+
+
 def test_search_prowlarr_intersects_imdb_modes_with_requested_indexers(monkeypatch):
     RecordingAsyncClient.calls = []
     monkeypatch.setattr("mpilot.acquisition.services.prowlarr.httpx.AsyncClient", RecordingAsyncClient)
@@ -191,4 +207,60 @@ def test_list_prowlarr_indexers_summarizes_native_and_configured_modes(monkeypat
         (4, False),
         (6, False),
         (9, True),
+    ]
+
+
+class MixedMediaResultsAsyncClient:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def get(self, url, *, params=None, headers=None):
+        return FakeProwlarrResponse(
+            [
+                {
+                    "title": "The.Count.Of.Monte.Cristo.2024.1080p.BluRay.x264",
+                    "downloadUrl": "/api/v1/indexer/1/download?link=movie",
+                    "categories": [{"id": 2040, "name": "Movies/HD"}],
+                },
+                {
+                    "title": "The.Count.of.Monte.Cristo.2025.S01.1080p.WEB-DL.x264",
+                    "downloadUrl": "/api/v1/indexer/1/download?link=tv-category",
+                    "categories": [{"id": 5040, "name": "TV/HD"}],
+                },
+                {
+                    "title": "The.Count.of.Monte.Cristo.2025.S01.1080p.WEB-DL.x265",
+                    "downloadUrl": "/api/v1/indexer/1/download?link=tv-title",
+                    "categories": [],
+                },
+                {
+                    "title": "Le.Comte.de.Monte-Cristo.2024.1080p.WEB-DL.x264",
+                    "downloadUrl": "/api/v1/indexer/1/download?link=uncategorized-movie",
+                    "categories": [],
+                },
+            ]
+        )
+
+
+def test_canonical_movie_filter_rejects_tv_categories_and_season_titles(monkeypatch):
+    monkeypatch.setattr(
+        "mpilot.acquisition.services.prowlarr.httpx.AsyncClient",
+        MixedMediaResultsAsyncClient,
+    )
+
+    results = asyncio.run(
+        search_prowlarr(
+            SearchRequest(query="tt26446278", categories=[2000], media_type="movie"),
+            _settings(),
+        )
+    )
+
+    assert [result.title for result in results] == [
+        "The.Count.Of.Monte.Cristo.2024.1080p.BluRay.x264",
+        "Le.Comte.de.Monte-Cristo.2024.1080p.WEB-DL.x264",
     ]
