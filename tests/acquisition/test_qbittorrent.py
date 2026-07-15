@@ -233,6 +233,10 @@ class FakeRedirectAsyncClient(FakeAsyncClient):
         )
 
 
+class FakePeerLinkRedirectAsyncClient(FakeRedirectAsyncClient):
+    redirect_location = f"magnet:?xt=urn:btih:{INFO_HASH}&dn=Test"
+
+
 def _settings():
     return SimpleNamespace(
         prowlarr_url="http://prowlarr.test",
@@ -425,6 +429,26 @@ def test_add_download_rejects_cross_origin_redirect_before_following_it(monkeypa
 
     assert FakeAsyncClient.fetched_urls == ["http://prowlarr.test/1/download?apikey=secret"]
     assert FakeQbittorrentClient.calls == []
+
+
+def test_add_download_accepts_peer_link_redirect_from_configured_prowlarr(monkeypatch):
+    _reset_fakes()
+    monkeypatch.setattr("mpilot.acquisition.services.qbittorrent.qbittorrentapi.Client", FakeQbittorrentClient)
+    monkeypatch.setattr(
+        "mpilot.acquisition.services.qbittorrent.httpx.AsyncClient",
+        FakePeerLinkRedirectAsyncClient,
+    )
+
+    asyncio.run(add_download_to_qbittorrent("http://prowlarr.test/1/download", _settings()))
+
+    assert FakeAsyncClient.fetched_urls == ["http://prowlarr.test/1/download?apikey=secret"]
+    assert FakeQbittorrentClient.calls == [
+        {
+            "urls": FakePeerLinkRedirectAsyncClient.redirect_location,
+            "tags": "qbitlarr.managed",
+            "save_path": None,
+        }
+    ]
 
 
 def test_add_download_rejects_oversized_http_torrent_response(monkeypatch):

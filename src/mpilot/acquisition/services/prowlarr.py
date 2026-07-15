@@ -16,6 +16,10 @@ from mpilot.acquisition.models import IndexerImdbSearchMode, ProwlarrIndexer, Se
 logger = logging.getLogger("qbitlarr-api.prowlarr")
 PROWLARR_SEARCH_MAX_ATTEMPTS = 2
 _BARE_IMDB_RE = re.compile(r"^(?:imdb:)?(tt\d{6,12})$", flags=re.IGNORECASE)
+_TV_RELEASE_MARKER_RE = re.compile(
+    r"\b(?:S\d{1,2}(?:E\d{1,3})?|Season\s+\d{1,2}|Complete\s+Season)\b",
+    flags=re.IGNORECASE,
+)
 
 
 async def search_prowlarr(
@@ -68,7 +72,7 @@ async def _search_imdb_by_indexer_mode(
                     }
                 ),
                 settings,
-                search_type="movie",
+                search_type=_native_imdb_search_type(request),
             )
         )
 
@@ -124,14 +128,71 @@ async def _search_prowlarr_once(
     if not isinstance(payload, list):
         raise UpstreamServiceError("Prowlarr returned an unexpected response shape")
 
+    filtered_payload = _filter_payload_by_media_type(payload, request.media_type)
     results = normalize_search_results(
-        payload,
+        filtered_payload,
         prowlarr_url=settings.prowlarr_url,
         prowlarr_download_url=settings.prowlarr_download_url,
         prowlarr_api_key=settings.prowlarr_api_key,
     )
     logger.info("Prowlarr search returned %s usable results", len(results))
     return results
+
+
+def _native_imdb_search_type(request: SearchRequest) -> str:
+    return "tvsearch" if request.media_type == "tv" else "movie"
+
+
+def _filter_payload_by_media_type(payload: list, media_type: str | None) -> list:
+    if media_type not in {"movie", "tv"}:
+        return payload
+
+    filtered = []
+    for item in payload:
+        if not isinstance(item, dict):
+            filtered.append(item)
+            continue
+
+        category_ids = _raw_result_category_ids(item)
+        has_movie_category = any(category_id // 1000 == 2 for category_id in category_ids)
+        has_tv_category = any(category_id // 1000 == 5 for category_id in category_ids)
+        title = str(item.get("title") or item.get("fileName") or "")
+
+        if media_type == "movie" and (has_tv_category or _TV_RELEASE_MARKER_RE.search(title)):
+            continue
+        if media_type == "tv" and has_movie_category and not has_tv_category:
+            continue
+        filtered.append(item)
+
+    if len(filtered) != len(payload):
+        logger.info(
+            "Canonical media-type filter kept %s/%s Prowlarr results for media_type=%s",
+            len(filtered),
+            len(payload),
+            media_type,
+        )
+    return filtered
+
+
+def _raw_result_category_ids(item: dict) -> set[int]:
+    category_ids: set[int] = set()
+    stack = list(item.get("categories") or [])
+    while stack:
+        category = stack.pop()
+        if isinstance(category, dict):
+            try:
+                category_ids.add(int(category["id"]))
+            except (KeyError, TypeError, ValueError):
+                pass
+            children = category.get("subCategories")
+            if isinstance(children, list):
+                stack.extend(children)
+            continue
+        try:
+            category_ids.add(int(category))
+        except (TypeError, ValueError):
+            pass
+    return category_ids
 
 
 async def list_prowlarr_indexers(settings: Settings) -> list[ProwlarrIndexer]:

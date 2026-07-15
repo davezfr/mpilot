@@ -47,6 +47,13 @@ class SearchRequest(BaseModel):
     query: str | None = Field(default=None, description="Optional search keywords")
     categories: list[int] | None = Field(default=None, description="Optional Prowlarr category IDs")
     indexer_ids: list[int] | None = Field(default=None, description="Optional Prowlarr indexer IDs")
+    media_type: Literal["movie", "tv"] | None = Field(
+        default=None,
+        description=(
+            "Optional canonical media type. It selects the native Prowlarr search type "
+            "and filters explicitly conflicting result categories locally."
+        ),
+    )
 
 
 class SearchResult(BaseModel):

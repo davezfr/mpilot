@@ -11,9 +11,13 @@ from mpilot.acquisition.models import SearchResult
 MediaType = Literal["movie", "tv"]
 
 MIN_AUTO_DOWNLOAD_SEEDERS = 5
+HEALTHY_SWARM_MIN_SEEDERS = 10
 DEFAULT_PREFER_RESOLUTION = "1080p"
 DEFAULT_PREFER_SOURCE = "WEB-DL"
 DEFAULT_PREFER_CODEC = "H.264"
+
+_HEALTHY_SWARM_SCORE_BASE = 100_000
+_SCARCE_SWARM_SEEDER_WEIGHT = 10_000
 
 
 @dataclass(frozen=True)
@@ -227,7 +231,20 @@ def calculate_score(
     if base_score is None:
         return None
 
-    return base_score + min(seeders, 99)
+    return combine_quality_and_swarm_score(base_score, seeders)
+
+
+def combine_quality_and_swarm_score(quality_score: int, seeders: int | None) -> int:
+    """Combine quality preference with swarm health for final ranking.
+
+    Double-digit swarms retain the normal quality-first ordering. For
+    single-digit swarms, every additional seeder outranks source/codec
+    preference so a scarce WEB-DL cannot hide a much healthier release.
+    """
+    normalized_seeders = max(int(seeders or 0), 0)
+    if normalized_seeders >= HEALTHY_SWARM_MIN_SEEDERS:
+        return _HEALTHY_SWARM_SCORE_BASE + quality_score + min(normalized_seeders, 99)
+    return normalized_seeders * _SCARCE_SWARM_SEEDER_WEIGHT + quality_score
 
 
 def calculate_quality_preference(

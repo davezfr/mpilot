@@ -15,6 +15,7 @@ from mpilot.acquisition.domain.quality import (
     QualityPreferences,
     calculate_quality_preference,
     calculate_score,
+    combine_quality_and_swarm_score,
     clean_display_title,
     contains_premium_quality_request,
     extract_imdb_id,
@@ -51,12 +52,17 @@ from mpilot.acquisition.models import (
 from mpilot.acquisition.services.prowlarr import search_prowlarr
 from mpilot.acquisition.services.query_snapshots import QuerySnapshotStore, create_query_id
 from mpilot.acquisition.services.qbittorrent import (
+    _build_torrent_add_payload,
     _download_torrent_file,
     add_download_to_qbittorrent,
     list_downloads_from_qbittorrent,
     tag_download_for_requester,
 )
-from mpilot.acquisition.services.wikidata import resolve_external_movie_id, search_movie_candidates
+from mpilot.acquisition.services.wikidata import (
+    resolve_external_movie_id,
+    resolve_imdb_metadata,
+    search_movie_candidates,
+)
 
 
 logger = logging.getLogger("mpilot.acquisition.api.handle")
@@ -76,6 +82,8 @@ COMPLEMENTARY_TRIGGER_MESSAGE = (
 DEFAULT_SEARCH_CATEGORIES = [2000, 5000]
 METADATA_VERIFICATION_LIMIT = 10
 METADATA_VERIFICATION_BATCH_SIZE = 2
+MANUAL_AVAILABILITY_BATCH_SIZE = 5
+MANUAL_AVAILABILITY_SCAN_MULTIPLIER = 3
 EXTERNAL_ID_UNRESOLVED_MESSAGE = (
     "I couldn't match that link to a movie reliably. "
     "For faster and more precise results, please send the IMDb link or IMDb ID instead."
@@ -233,9 +241,27 @@ async def _handle_imdb_request(
     requester_id: str | None,
     mode: str = "auto",
 ) -> HandleResponse:
-    base_request = SearchRequest(query=imdb_id, categories=get_categories(user_message))
+    canonical_media_type: MediaType | None = None
+    try:
+        metadata = await resolve_imdb_metadata(imdb_id, settings)
+    except UpstreamServiceError as exc:
+        logger.warning(
+            "IMDb media-type lookup failed for imdb_id=%s; using mixed-category fallback: %s",
+            imdb_id,
+            exc,
+        )
+    else:
+        resolved_media_type = metadata.get("media_type") if isinstance(metadata, dict) else None
+        if resolved_media_type in {"movie", "tv"}:
+            canonical_media_type = resolved_media_type
+
+    base_request = SearchRequest(
+        query=imdb_id,
+        categories=get_categories(user_message, media_type=canonical_media_type),
+        media_type=canonical_media_type,
+    )
     primary_results = await search_prowlarr(base_request, settings)
-    media_type = infer_media_type(user_message, primary_results)
+    media_type = canonical_media_type or infer_media_type(user_message, primary_results)
     if not primary_results:
         store.create(
             query_id=query_id,
@@ -331,13 +357,6 @@ async def _handle_imdb_request(
             alternatives=_to_manual_results(primary_ranked[:_INLINE_ALTERNATIVE_LIMIT], compact_labels=True) or None,
         )
 
-    selected = await _select_best_verified_result(
-        primary_results,
-        settings,
-        media_type=media_type,
-        prefer_premium=prefer_premium,
-        requested_resolution=requested_resolution,
-    )
     primary_ranked = _rank_results(
         primary_results,
         media_type=media_type,
@@ -348,6 +367,54 @@ async def _handle_imdb_request(
     )
     snapshot_status = "imdb_ready"
 
+    if mode == "manual":
+        manual_result_limit = _manual_result_limit(settings)
+        primary_ranked = await _available_manual_results(
+            primary_ranked,
+            settings,
+            limit=manual_result_limit,
+        )
+        store.create(
+            query_id=query_id,
+            request=_snapshot_request_payload(
+                user_message=user_message,
+                search_request=base_request,
+                settings=settings,
+                requester_id=requester_id,
+                imdb_id=imdb_id,
+                media_type=media_type,
+            ),
+            status=snapshot_status,
+            reason="imdb_results_ready",
+            results=primary_ranked,
+            metadata={"search_strategy": "imdb", "raw_result_count": len(primary_results)},
+        )
+        return _manual_results_response(
+            primary_ranked,
+            status="success" if primary_ranked else "not_found",
+            message=MANUAL_RESULTS_MESSAGE,
+            media_type=media_type,
+            prefer_premium=prefer_premium,
+            requested_resolution=requested_resolution,
+            query_id=query_id,
+            snapshot_status="imdb_ready",
+            preferences=preferences,
+            compact_labels=True,
+            manual_result_limit=manual_result_limit,
+            choice_style=_choice_style(settings),
+            imdb_id=imdb_id,
+            search_strategy="imdb",
+            results_verified_by_imdb_id=True,
+            preserve_order=True,
+        )
+
+    selected = await _select_best_verified_result(
+        primary_results,
+        settings,
+        media_type=media_type,
+        prefer_premium=prefer_premium,
+        requested_resolution=requested_resolution,
+    )
     store.create(
         query_id=query_id,
         request=_snapshot_request_payload(
@@ -363,25 +430,6 @@ async def _handle_imdb_request(
         results=primary_ranked,
         metadata={"search_strategy": "imdb", "raw_result_count": len(primary_results)},
     )
-
-    if mode == "manual":
-        return _manual_results_response(
-            primary_ranked,
-            status="success" if primary_ranked else "not_found",
-            message=MANUAL_RESULTS_MESSAGE,
-            media_type=media_type,
-            prefer_premium=prefer_premium,
-            requested_resolution=requested_resolution,
-            query_id=query_id,
-            snapshot_status="imdb_ready",
-            preferences=preferences,
-            compact_labels=True,
-            manual_result_limit=_manual_result_limit(settings),
-            choice_style=_choice_style(settings),
-            imdb_id=imdb_id,
-            search_strategy="imdb",
-            results_verified_by_imdb_id=True,
-        )
 
     if not selected:
         logger.info(
@@ -560,12 +608,75 @@ def _dedupe_same_release(results: list[SearchResult]) -> list[SearchResult]:
     seen: set[tuple[str, int | None]] = set()
     deduped = []
     for result in results:
-        key = (format_choice_label(parse_quality(result.title)), result.size)
+        key = _manual_release_key(result)
         if key in seen:
             continue
         seen.add(key)
         deduped.append(result)
     return deduped
+
+
+def _manual_release_key(result: SearchResult) -> tuple[str, int | None]:
+    return format_choice_label(parse_quality(result.title)), result.size
+
+
+async def _available_manual_results(
+    results: list[SearchResult],
+    settings: Settings,
+    *,
+    limit: int,
+) -> list[SearchResult]:
+    if not _manual_availability_checks_enabled(settings):
+        return results
+
+    direct_peer_results = [result for result in results if _is_direct_peer_link(result.download_link)]
+    http_results = [result for result in results if not _is_direct_peer_link(result.download_link)]
+    available: list[SearchResult] = []
+    seen: set[tuple[str, int | None]] = set()
+
+    def keep(result: SearchResult) -> None:
+        key = _manual_release_key(result)
+        if key not in seen:
+            seen.add(key)
+            available.append(result)
+
+    for result in direct_peer_results:
+        keep(result)
+        if len(available) >= limit:
+            return available
+
+    max_http_checks = max(limit, limit * MANUAL_AVAILABILITY_SCAN_MULTIPLIER)
+    http_candidates = http_results[:max_http_checks]
+    for start in range(0, len(http_candidates), MANUAL_AVAILABILITY_BATCH_SIZE):
+        batch = http_candidates[start : start + MANUAL_AVAILABILITY_BATCH_SIZE]
+        checks = await asyncio.gather(*(_is_download_source_available(result, settings) for result in batch))
+        for result, is_available in zip(batch, checks):
+            if is_available:
+                keep(result)
+            if len(available) >= limit:
+                return available
+
+    return available
+
+
+def _manual_availability_checks_enabled(settings: Settings) -> bool:
+    return bool(
+        str(getattr(settings, "prowlarr_url", "") or "").strip()
+        and str(getattr(settings, "prowlarr_api_key", "") or "").strip()
+    )
+
+
+def _is_direct_peer_link(download_link: str) -> bool:
+    return urlparse(download_link).scheme.lower() in {"magnet", "bc"}
+
+
+async def _is_download_source_available(result: SearchResult, settings: Settings) -> bool:
+    try:
+        await _build_torrent_add_payload(result.download_link, settings)
+    except UpstreamServiceError:
+        logger.info("Skipping unavailable manual result indexer=%s", result.indexer or "unknown")
+        return False
+    return True
 
 
 _INLINE_ALTERNATIVE_LIMIT = 3
@@ -760,8 +871,12 @@ def _pluralize_seeder(seeders: int) -> str:
     return "seeder" if seeders == 1 else "seeders"
 
 
-def get_categories(user_message: str) -> list[int]:
+def get_categories(user_message: str, *, media_type: MediaType | None = None) -> list[int]:
     del user_message
+    if media_type == "movie":
+        return [category for category in DEFAULT_SEARCH_CATEGORIES if category // 1000 == 2]
+    if media_type == "tv":
+        return [category for category in DEFAULT_SEARCH_CATEGORIES if category // 1000 == 5]
     return list(DEFAULT_SEARCH_CATEGORIES)
 
 
@@ -873,15 +988,18 @@ def _manual_results_response(
     search_strategy: str | None = None,
     query_used: str | None = None,
     results_verified_by_imdb_id: bool | None = None,
+    preserve_order: bool = False,
 ) -> HandleResponse:
-    ranked_results = _rank_results(
-        results,
-        media_type=media_type,
-        prefer_premium=prefer_premium,
-        requested_resolution=requested_resolution,
-        require_min_seeders=False,
-        preferences=preferences,
-    )
+    ranked_results = results
+    if not preserve_order:
+        ranked_results = _rank_results(
+            results,
+            media_type=media_type,
+            prefer_premium=prefer_premium,
+            requested_resolution=requested_resolution,
+            require_min_seeders=False,
+            preferences=preferences,
+        )
     manual_results = _to_manual_results(
         ranked_results,
         compact_labels=compact_labels,
@@ -1054,7 +1172,7 @@ def _result_rank_score(
     if preference_score is None:
         return None
 
-    return preference_score + min(result.seeders or 0, 99)
+    return combine_quality_and_swarm_score(preference_score, result.seeders)
 
 
 def _snapshot_request_payload(
