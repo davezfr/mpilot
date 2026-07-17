@@ -2058,12 +2058,16 @@ def plex_search_summary(args: argparse.Namespace) -> Dict[str, Any]:
             year=args.year,
             limit=args.limit,
         )
-        if local_result.get("status") != "no_match" or plex_error is not None:
+        if local_result.get("status") != "no_match":
             if plex_error is not None:
                 local_result["fallback_reason"] = str(plex_error)
             else:
                 local_result["fallback_reason"] = "plex_no_match"
             return local_result
+        if plex_error is not None:
+            raise plex_error
+        local_result["fallback_reason"] = "plex_no_match"
+        return local_result
     if plex_error is not None:
         raise plex_error
     return result

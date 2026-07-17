@@ -234,6 +234,35 @@ class PlexResolver:
         if (season is None) != (episode is None):
             raise ValueError("pass both --season and --episode for TV episodes")
 
+        original_query = query.strip()
+        last_result: Dict[str, Any] = {}
+        for search_query in _title_search_queries(original_query):
+            last_result = self._search_by_title_once(
+                search_query,
+                season=season,
+                episode=episode,
+                year=year,
+                limit=limit,
+            )
+            if last_result.get("status") == "no_match":
+                continue
+            last_result["query"] = original_query
+            if search_query != original_query:
+                last_result["query_used"] = search_query
+                last_result["search_strategy"] = "normalized_title_fallback"
+            return last_result
+
+        last_result["query"] = original_query
+        return last_result
+
+    def _search_by_title_once(
+        self,
+        query: str,
+        season: Optional[int],
+        episode: Optional[int],
+        year: Optional[int],
+        limit: int,
+    ) -> Dict[str, Any]:
         playable: List[Dict[str, Any]] = []
         needs_episode: List[Dict[str, Any]] = []
         seen = set()
@@ -495,6 +524,19 @@ def imdb_guid(imdb: str) -> str:
 
 def episode_matches(item: Dict[str, Any], season: int, episode: int) -> bool:
     return _optional_int(item.get("parentIndex")) == season and _optional_int(item.get("index")) == episode
+
+
+def _title_search_queries(query: str) -> List[str]:
+    queries = [query]
+    simplified = re.sub(
+        r"(?:\s*[:\-\u2013\u2014]\s*|\s+)the\s+movie\s*$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    ).strip(" :-\u2013\u2014")
+    if simplified and simplified.casefold() != query.casefold():
+        queries.append(simplified)
+    return queries
 
 
 def _show_candidate(item: Dict[str, Any]) -> Dict[str, Any]:

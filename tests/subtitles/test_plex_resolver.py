@@ -214,6 +214,31 @@ class PlexResolverTests(unittest.TestCase):
         self.assertEqual(result["matches"][0]["ratingKey"], "101")
         self.assertEqual(result["matches"][0]["local_file"], "/mnt/media/Movies/Example Movie.mkv")
 
+    def test_searches_title_again_after_removing_the_movie_suffix(self):
+        f1_detail = dict(MOVIE_DETAIL, title="F1")
+
+        class QueryAwarePlexClient(FakePlexClient):
+            def __init__(self):
+                super().__init__(metadata_by_rating_key={"101": f1_detail})
+                self.queries = []
+
+            def search(self, query, limit=50):
+                self.queries.append(query)
+                if query == "F1":
+                    return [{"ratingKey": "101", "type": "movie", "title": "F1"}]
+                return []
+
+        client = QueryAwarePlexClient()
+        resolver = PlexResolver(client, PathMapping("/server/media", "/mnt/media"))
+
+        result = resolver.search_by_title("F1 the movie")
+
+        self.assertEqual(result["status"], "single_match")
+        self.assertEqual(result["query"], "F1 the movie")
+        self.assertEqual(result["query_used"], "F1")
+        self.assertEqual(result["search_strategy"], "normalized_title_fallback")
+        self.assertEqual(client.queries, ["F1 the movie", "F1"])
+
     def test_searches_title_and_returns_multiple_playable_matches(self):
         alternate_movie = dict(MOVIE_DETAIL, ratingKey="102", title="Example Movie 2")
         client = FakePlexClient(
@@ -341,6 +366,24 @@ class PlexResolverTests(unittest.TestCase):
             self.assertEqual(result["status"], "single_match")
             self.assertEqual(result["source"], "local")
             self.assertEqual(result["matches"][0]["local_file"], str(video))
+
+    def test_plex_search_surfaces_plex_error_when_local_fallback_has_no_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(
+                os.environ,
+                {
+                    "BABELARR_NO_DOTENV": "1",
+                    "BABELARR_LOCAL_PATH_PREFIX": tmp,
+                    "BABELARR_PLEX_PATH_PREFIX": "/server/media",
+                    "PLEX_BASE_URL": "",
+                    "PLEX_TOKEN": "",
+                },
+                clear=True,
+            ):
+                args = build_parser().parse_args(["plex-search", "--query", "F1 the movie"])
+
+            with self.assertRaisesRegex(PlexConfigurationError, "PLEX_BASE_URL is required"):
+                summary_from_args(args)
 
     def test_plex_search_uses_local_tv_episode_match_before_plex_network(self):
         class UnexpectedPlexApiClient:
