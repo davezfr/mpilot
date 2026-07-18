@@ -24,6 +24,20 @@ def allow_loopback(monkeypatch):
     monkeypatch.delenv("MPILOT_ACQUISITION_API_KEY", raising=False)
     monkeypatch.delenv("MPILOT_ACQUISITION_REQUESTER_API_KEYS", raising=False)
 
+    async def deterministic_handle_metadata(imdb_id, settings):
+        if imdb_id != "tt7587282":
+            return None
+        return {
+            "imdb_id": imdb_id,
+            "canonical_title": "Port Authority",
+            "title_aliases": [],
+            "year": 2019,
+            "media_type": "movie",
+            "metadata_source": "test",
+        }
+
+    monkeypatch.setattr("mpilot.api.handle.resolve_imdb_metadata", deterministic_handle_metadata)
+
 
 def _settings(tmp_path, *, complementary_ids=None):
     return SimpleNamespace(
