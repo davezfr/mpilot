@@ -19,8 +19,9 @@ from mpilot.api.main import (
     normalize_download_link,
     normalize_search_results,
 )
-from mpilot.acquisition.models import TorrentStatus
 from mpilot.acquisition.exceptions import ConfigurationError
+from mpilot.acquisition.models import SearchResult, TorrentStatus
+from mpilot.acquisition.services.query_snapshots import QuerySnapshotStore
 
 
 @pytest.fixture(autouse=True)
@@ -559,6 +560,10 @@ def test_normalize_search_results_filters_duplicates_and_invalid_links():
             "seeders": 10,
             "leechers": 2,
             "indexer": "Indexer A",
+            "indexerId": 4,
+            "imdbId": 45877,
+            "tmdbId": 123,
+            "tvdbId": 0,
         },
         {
             "title": "Duplicate",
@@ -597,6 +602,10 @@ def test_normalize_search_results_filters_duplicates_and_invalid_links():
     assert len(normalized) == 27
     assert normalized[0].title == "First"
     assert normalized[0].download_link == "http://prowlarr:9696/api/v1/indexer/1/download?link=abc"
+    assert normalized[0].indexer_id == 4
+    assert normalized[0].source_imdb_id == "tt0045877"
+    assert normalized[0].source_tmdb_id == 123
+    assert normalized[0].source_tvdb_id is None
     assert normalized[1].download_link == "magnet:?xt=urn:btih:abcdef"
     assert len({item.download_link for item in normalized}) == len(normalized)
 
@@ -881,7 +890,16 @@ def test_download_endpoint_uses_query_context_to_keep_manual_selection_in_tv_pat
 
     QuerySnapshotStore(str(tmp_path)).create(
         query_id="query-tv-manual",
-        request={"input": "tt0017925", "query": "tt0017925", "requester_id": "telegram:123456789"},
+        request={
+            "input": "tt0017925",
+            "query": "tt0017925",
+            "imdb_id": "tt0017925",
+            "media_type": "tv",
+            "canonical_title": "Example Show",
+            "canonical_year": 2025,
+            "title_aliases": [],
+            "requester_id": "telegram:123456789",
+        },
         status="imdb_ready",
         reason="primary_results_ready",
         results=[
@@ -891,6 +909,8 @@ def test_download_endpoint_uses_query_context_to_keep_manual_selection_in_tv_pat
                 "size": 1_000_000_000,
                 "seeders": 10,
                 "indexer": "Indexer A",
+                "verification_status": "imdb_verified",
+                "verification_reason": "title_year",
             }
         ],
     )
@@ -914,6 +934,114 @@ def test_download_endpoint_uses_query_context_to_keep_manual_selection_in_tv_pat
         "save_path": "/downloads/tv/Example Show",
         "requester_id": "telegram:123456789",
     }
+
+
+@pytest.mark.parametrize(
+    ("stored_verification_status", "requested_link", "expected_detail"),
+    [
+        ("unverified", "magnet:?xt=urn:btih:abcdef", "download_link is not verified for query_id"),
+        (
+            "imdb_verified",
+            "magnet:?xt=urn:btih:different",
+            "download_link is not authorized for query_id",
+        ),
+    ],
+)
+def test_download_endpoint_rejects_unverified_or_unlisted_snapshot_links(
+    monkeypatch,
+    tmp_path,
+    stored_verification_status,
+    requested_link,
+    expected_detail,
+):
+    async def unexpected_add_download(download_link, settings, *, save_path=None, requester_id=None):
+        raise AssertionError("rejected snapshot selection must not be queued")
+
+    QuerySnapshotStore(str(tmp_path)).create(
+        query_id="query-gated-download",
+        request={"input": "tt0045877", "query": "tt0045877"},
+        status="imdb_ready",
+        reason="imdb_results_ready",
+        results=[
+            SearchResult(
+                title="The.Hitch-Hiker.1953.1080p.WEB-DL.H264",
+                download_link="magnet:?xt=urn:btih:abcdef",
+                verification_status=stored_verification_status,
+            )
+        ],
+    )
+    monkeypatch.setattr("mpilot.api.download.add_download_to_qbittorrent", unexpected_add_download)
+    monkeypatch.setattr(
+        "mpilot.api.download.get_settings",
+        lambda: SimpleNamespace(
+            query_snapshot_dir=str(tmp_path),
+            qbitlarr_save_path_movie="/downloads/movies",
+            qbitlarr_save_path_movie_4k="/downloads/movies-4k",
+            qbitlarr_save_path_tv="/downloads/tv",
+            qbitlarr_extra_save_paths=None,
+        ),
+    )
+
+    response = TestClient(app).post(
+        "/download",
+        json={"download_link": requested_link, "query_id": "query-gated-download"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == expected_detail
+
+
+def test_download_endpoint_revalidates_http_torrent_payload_identity(monkeypatch, tmp_path):
+    download_link = "https://example.test/prowlarr/download"
+
+    async def mismatched_payload_title(download_link, settings):
+        return "IMDB Top 250 Movies Collection 2013 1080p"
+
+    async def unexpected_add_download(download_link, settings, *, save_path=None, requester_id=None):
+        raise AssertionError("mismatched torrent payload must not be queued")
+
+    QuerySnapshotStore(str(tmp_path)).create(
+        query_id="query-payload-gate",
+        request={
+            "input": "tt1979320",
+            "query": "tt1979320",
+            "imdb_id": "tt1979320",
+            "media_type": "movie",
+            "canonical_title": "Rush",
+            "canonical_year": 2013,
+            "title_aliases": [],
+        },
+        status="imdb_ready",
+        reason="imdb_results_ready",
+        results=[
+            SearchResult(
+                title="Rush.2013.1080p.BluRay",
+                download_link=download_link,
+                verification_status="imdb_verified",
+                verification_reason="title_year",
+            )
+        ],
+    )
+    monkeypatch.setattr("mpilot.api.download._download_title_from_link", mismatched_payload_title)
+    monkeypatch.setattr("mpilot.api.download.add_download_to_qbittorrent", unexpected_add_download)
+    monkeypatch.setattr(
+        "mpilot.api.download.get_settings",
+        lambda: SimpleNamespace(
+            query_snapshot_dir=str(tmp_path),
+            qbitlarr_save_path_movie="/downloads/movies",
+            qbitlarr_save_path_movie_4k="/downloads/movies-4k",
+            qbitlarr_save_path_tv="/downloads/tv",
+            qbitlarr_extra_save_paths=None,
+        ),
+    )
+
+    response = TestClient(app).post(
+        "/download",
+        json={"download_link": download_link, "query_id": "query-payload-gate"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "download payload failed IMDb identity verification"
 
 
 def test_download_endpoint_sanitizes_inferred_tv_show_folder(monkeypatch):

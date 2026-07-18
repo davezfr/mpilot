@@ -11,9 +11,13 @@ from mpilot.acquisition.models import SearchResult
 MediaType = Literal["movie", "tv"]
 
 MIN_AUTO_DOWNLOAD_SEEDERS = 5
+HEALTHY_SWARM_MIN_SEEDERS = 10
 DEFAULT_PREFER_RESOLUTION = "1080p"
 DEFAULT_PREFER_SOURCE = "WEB-DL"
 DEFAULT_PREFER_CODEC = "H.264"
+
+_HEALTHY_SWARM_SCORE_BASE = 100_000
+_SCARCE_SWARM_SEEDER_WEIGHT = 10_000
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,18 @@ _DOUBAN_SUBJECT_RE = re.compile(r"/subject/([1-9]\d*)/?", re.IGNORECASE)
 _ALLOCINE_CFILM_RE = re.compile(r"fichefilm_gen_cfilm=([1-9]\d{0,9})\.html", re.IGNORECASE)
 _TV_MARKER_RE = re.compile(
     r"\b(S\d{1,2}(?:E\d{1,3})?|Season\s+\d{1,2}|Complete\s+Season)\b",
+    re.IGNORECASE,
+)
+_LOW_RESOLUTION_RELEASE_RE = re.compile(
+    r"(?:"
+    r"\b(?:hd\s*)?720p(?:50|60)?\b"
+    r"|\b1280\s*[x×]\s*720p?\b"
+    r"|\b(?:576|540|480|360)p(?:25|30|50|60)?\b"
+    r")",
+    re.IGNORECASE,
+)
+_SD_DVD_SOURCE_RE = re.compile(
+    r"\b(?:dvd\s*rip|dvdrip|dvd\s*scr|dvdscr|dvd\s*[59])\b",
     re.IGNORECASE,
 )
 
@@ -114,6 +130,19 @@ def extract_requested_resolution(user_message: str) -> str | None:
     return requested
 
 
+def is_low_resolution_release(title: str) -> bool:
+    """Detect explicit sub-1080p and standard-definition DVD markers.
+
+    Source-only labels such as HDTV, WEB-DL, WEBRip, BluRay, BDRip, and
+    BRRip remain eligible because they do not determine resolution alone.
+    """
+    normalized = _normalize_release_text(title)
+    return bool(
+        _LOW_RESOLUTION_RELEASE_RE.search(normalized)
+        or _SD_DVD_SOURCE_RE.search(normalized)
+    )
+
+
 def infer_media_type(user_message: str, results: list[SearchResult] | None = None) -> MediaType:
     if _TV_MARKER_RE.search(user_message):
         return "tv"
@@ -131,9 +160,9 @@ def parse_quality(title: str) -> ParsedQuality:
     resolution = None
     if re.search(r"\b(2160p|4k|uhd)\b", normalized, flags=re.IGNORECASE):
         resolution = "2160p"
-    elif re.search(r"\b1080p\b", normalized, flags=re.IGNORECASE):
+    elif re.search(r"\b(?:hd\s*)?1080p\b", normalized, flags=re.IGNORECASE):
         resolution = "1080p"
-    elif re.search(r"\b720p\b", normalized, flags=re.IGNORECASE):
+    elif re.search(r"\b(?:hd\s*)?720p\b", normalized, flags=re.IGNORECASE):
         resolution = "720p"
     elif re.search(r"\b480p\b", normalized, flags=re.IGNORECASE):
         resolution = "480p"
@@ -227,7 +256,20 @@ def calculate_score(
     if base_score is None:
         return None
 
-    return base_score + min(seeders, 99)
+    return combine_quality_and_swarm_score(base_score, seeders)
+
+
+def combine_quality_and_swarm_score(quality_score: int, seeders: int | None) -> int:
+    """Combine quality preference with swarm health for final ranking.
+
+    Double-digit swarms retain the normal quality-first ordering. For
+    single-digit swarms, every additional seeder outranks source/codec
+    preference so a scarce WEB-DL cannot hide a much healthier release.
+    """
+    normalized_seeders = max(int(seeders or 0), 0)
+    if normalized_seeders >= HEALTHY_SWARM_MIN_SEEDERS:
+        return _HEALTHY_SWARM_SCORE_BASE + quality_score + min(normalized_seeders, 99)
+    return normalized_seeders * _SCARCE_SWARM_SEEDER_WEIGHT + quality_score
 
 
 def calculate_quality_preference(

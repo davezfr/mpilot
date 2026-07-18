@@ -183,7 +183,7 @@ def record_local_video_subtitle_intent(
     """Record a ready subtitle task for an already local or Plex-resolved video file."""
     return _runtime().record_local_video_subtitle_intent(
         requester_id=requester_id,
-        video_path=_map_path_from_env(video_path) or video_path,
+        video_path=_map_local_video_path_from_env(video_path) or video_path,
         title=title,
         imdb_id=imdb_id,
         media_type=media_type,
@@ -421,6 +421,27 @@ def _map_path_from_env(value: Optional[str]) -> Optional[str]:
             os.environ.get("MPILOT_RUNTIME_LOCAL_CONTENT_PATH_PREFIX")
             or os.environ.get("BABELARR_RUNTIME_LOCAL_CONTENT_PATH_PREFIX")
             or os.environ.get("MWR_LOCAL_CONTENT_PATH_PREFIX")
+        ),
+    )
+
+
+def _map_local_video_path_from_env(value: Optional[str]) -> Optional[str]:
+    """Map container or Plex/NAS paths to the canonical local media prefix."""
+    mapped = _map_path_from_env(value)
+    normalized = value.strip() if isinstance(value, str) else value
+    if mapped is None or mapped != normalized:
+        return mapped
+    return _mapped_content_path(
+        mapped,
+        content_path_prefix=(
+            os.environ.get("MPILOT_PLEX_PATH_PREFIX")
+            or os.environ.get("BABELARR_PLEX_PATH_PREFIX")
+            or os.environ.get("MST_PLEX_PATH_PREFIX")
+        ),
+        local_content_path_prefix=(
+            os.environ.get("MPILOT_LOCAL_PATH_PREFIX")
+            or os.environ.get("BABELARR_LOCAL_PATH_PREFIX")
+            or os.environ.get("MST_LOCAL_PATH_PREFIX")
         ),
     )
 

@@ -38,6 +38,12 @@ class TorrentAddPayload:
     info_hash: str | None = None
 
 
+class _TorrentPeerLinkRedirect(UpstreamServiceError):
+    def __init__(self, download_link: str):
+        super().__init__("Torrent URL redirected to a peer link")
+        self.download_link = download_link
+
+
 async def add_download_to_qbittorrent(
     download_link: str,
     settings: Settings,
@@ -101,7 +107,13 @@ async def add_download_to_qbittorrent(
 
 async def _build_torrent_add_payload(download_link: str, settings: Settings) -> TorrentAddPayload:
     if _should_upload_torrent_file(download_link):
-        content = await _download_torrent_file(download_link, settings)
+        try:
+            content = await _download_torrent_file(download_link, settings)
+        except _TorrentPeerLinkRedirect as redirect:
+            return TorrentAddPayload(
+                kwargs={"urls": redirect.download_link},
+                info_hash=_info_hash_from_magnet(redirect.download_link),
+            )
         info_hash = parse_torrent_info_hash(content)
         if not info_hash:
             raise UpstreamServiceError("Torrent URL returned invalid torrent data")
@@ -152,6 +164,8 @@ async def _fetch_torrent_file(client, fetch_url: str, settings: Settings) -> byt
                 if not location or redirect_count >= _TORRENT_FILE_MAX_REDIRECTS:
                     raise UpstreamServiceError("Torrent URL returned an invalid redirect")
                 next_url = urljoin(current_url, location)
+                if urlparse(next_url).scheme.lower() in {"magnet", "bc"}:
+                    raise _TorrentPeerLinkRedirect(next_url)
                 _validate_torrent_fetch_url(next_url, settings)
                 current_url = next_url
                 continue

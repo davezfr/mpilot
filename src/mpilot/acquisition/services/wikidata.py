@@ -111,11 +111,13 @@ async def resolve_imdb_metadata(imdb_id: str, settings: Settings) -> dict[str, A
 
     type_values = " ".join(f"wd:{qid}" for qid in MOVIE_CANDIDATE_TYPE_QIDS)
     query = (
-        "SELECT ?item ?itemLabel ?year ?type WHERE { "
+        "SELECT ?item ?itemLabel ?alias ?originalTitle ?year ?type WHERE { "
         f'?item wdt:P345 "{normalized}" . '
         "?item wdt:P31/wdt:P279* ?type . "
         f"VALUES ?type {{ {type_values} }} "
         "OPTIONAL { ?item wdt:P577 ?date . BIND(YEAR(?date) AS ?year) } "
+        'OPTIONAL { ?item skos:altLabel ?alias . FILTER(LANG(?alias) = "en") } '
+        "OPTIONAL { ?item wdt:P1476 ?originalTitle . } "
         'SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . } '
         "} ORDER BY ?year LIMIT 20"
     )
@@ -133,6 +135,7 @@ def _parse_imdb_metadata(payload: dict[str, Any] | None, *, imdb_id: str) -> dic
     title: str | None = None
     qid: str | None = None
     years: list[int] = []
+    aliases: set[str] = set()
     media_type = "movie"
     for binding in bindings:
         if not isinstance(binding, dict):
@@ -141,6 +144,12 @@ def _parse_imdb_metadata(payload: dict[str, Any] | None, *, imdb_id: str) -> dic
         candidate_title = _binding_value(binding.get("itemLabel"))
         if candidate_title and candidate_title != candidate_qid:
             title = title or candidate_title
+        alias = _binding_value(binding.get("alias"))
+        if alias:
+            aliases.add(alias)
+        original_title = _binding_value(binding.get("originalTitle"))
+        if original_title:
+            aliases.add(original_title)
         qid = qid or candidate_qid
         year = _parse_year(_binding_value(binding.get("year")))
         if year is not None:
@@ -151,9 +160,11 @@ def _parse_imdb_metadata(payload: dict[str, Any] | None, *, imdb_id: str) -> dic
 
     if not title or not years:
         return None
+    aliases.discard(title)
     return {
         "imdb_id": imdb_id,
         "canonical_title": title,
+        "title_aliases": sorted(aliases, key=str.casefold),
         "year": min(years),
         "media_type": media_type,
         "metadata_source": "wikidata",

@@ -165,11 +165,23 @@ added Prowlarr indexer is reported as `unconfigured` and is not used for IMDb
 requests until you classify it. This prevents a new source from silently
 receiving the wrong query form.
 
+Query routing is transport only; a provider returning something for `tt...`
+does not prove that the individual release belongs to that IMDb title. Before
+ranking or displaying results, MPilot resolves canonical title metadata and
+applies a local identity gate: the canonical title or a known alias must match,
+movies must carry the exact release year, conflicting IDs/years and collection
+markers are rejected, and rejected links are not written into the selectable
+snapshot. A `query_id` download is accepted only for a result that passed this
+gate (or the separate strict title/year gate below). If canonical metadata is
+unavailable while raw results exist, acquisition fails closed instead of
+trusting provider ranking.
+
 Complementary title search is configured independently with
 `MPILOT_PROWLARR_COMPLEMENTARY_INDEXER_IDS`. It runs only after a successful
-zero-result IMDb pass or an explicit qbot `补充搜索` control phrase, derives a
-canonical `title + year` query from Wikidata, and always returns manual choices.
-Indexer IDs are installation-specific, so the public default is empty.
+IMDb pass produces zero identity-verified results or an explicit qbot `补充搜索`
+control phrase, derives a canonical `title + year` query from Wikidata, and
+always returns locally title/year-validated manual choices. Indexer IDs are
+installation-specific, so the public default is empty.
 
 Run `mpilot acquisition indexers` (or call `acquisition_list_indexers`) to see
 the central summary. Each row includes the effective `imdb_search_mode` and

@@ -25,7 +25,10 @@ SERVER_INSTRUCTIONS = (
     "to download media and optionally add subtitle processing in one request. "
     "For qbot: when acquisition_handle returns action=complementary_search, send its message first and then call "
     "acquisition_complementary_search with the returned query_id without waiting. Treat exact trimmed Telegram input "
-    "补充搜索 as a control phrase for the active query_id; never pass it to acquisition_handle."
+    "补充搜索 as a control phrase for the active query_id; never pass it to acquisition_handle. "
+    "Treat the exact clarify response 🔎 as the same deterministic complementary-search action. "
+    "When a response contains message_key, localize that semantic key with message_params in the current "
+    "conversation language; message is only an English fallback and must not determine the reply language."
 )
 
 logger = logging.getLogger("mpilot-mcp")
@@ -276,10 +279,11 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
             present, ask an open-ended clarify question that includes
             agent_clarify.display_table in a monospace/code block. If
             agent_clarify.display_notice is present, append it as short notice
-            text. Pass agent_clarify.choices as the numeric button labels and
-            use agent_clarify.response_mapping to map the selected number back
-            to a result index. Do not pass table rows as clarify choices or
-            append another numbered list.
+            text. Pass agent_clarify.choices unchanged as the button labels and
+            use agent_clarify.response_mapping to map the selected response.
+            A 🔎 mapping means call acquisition_complementary_search with its
+            query_id; it is not a release selection. Do not pass table rows as
+            clarify choices or append another numbered list.
           - "auto_download" (mode="auto" only): the best release was queued;
             an "alternatives" list of runner-ups is included for "did you
             mean..." follow-up.
@@ -295,8 +299,11 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
           - "needs_imdb": no title could be identified. Relay the message and
             ask the user to send an IMDb link or ID.
           - "complementary_search": qbot must first send the returned message
-            to Telegram, then immediately call acquisition_complementary_search
-            with the returned query_id without waiting for another user reply.
+            meaning to Telegram in the current conversation language, using
+            message_key/message_params when present. Then immediately call
+            acquisition_complementary_search with the returned query_id without
+            waiting for another user reply. Do not send message verbatim merely
+            because it is populated; it is an English fallback.
 
         Args:
             user_message: Media link, canonical ID, title, season phrase, or
@@ -350,11 +357,14 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         """Run MPilot's manual-only complementary title/year search for an existing query.
 
         qbot protocol: when acquisition_handle returns action=complementary_search,
-        first send that returned message to Telegram, then call this tool automatically
-        with the same query_id without waiting for user confirmation. Also call this tool
+        first localize and send that response's message_key/message_params to Telegram,
+        then call this tool automatically with the same query_id without waiting for user
+        confirmation. Localize this tool's message_key/message_params again when rendering
+        results; message is only an English fallback. Also call this tool
         when the user enters the exact control phrase 补充搜索 after trimming surrounding
-        whitespace and the current conversation or Topic has an active query_id. Never
-        send 补充搜索 to acquisition_handle. If there is no active query_id, tell the user
+        whitespace, or chooses the exact 🔎 clarify response, and the current conversation
+        or Topic has an active query_id. Never send either control value to acquisition_handle.
+        If there is no active query_id, tell the user
         to search for a movie or show first and do not call either search tool. Render
         returned choices like normal manual release choices; they are title/year validated
         candidates and are explicitly not IMDb-ID verified. Never auto-download them.
@@ -409,8 +419,10 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
         """Queue a torrent or magnet link in qBittorrent.
 
         Pass a download_link from acquisition_search results or an
-        acquisition_handle manual selection. Accepted schemes are http, https
-        direct .torrent files, magnet, and bc.
+        acquisition_handle manual selection. For acquisition_handle choices,
+        query_id is required and the selected result must have passed MPilot's
+        snapshot verification gate. Accepted schemes are http, https direct
+        .torrent files, magnet, and bc.
 
         On success, send returned rendered_status verbatim as a status message
         so the user sees MPilot's prepared progress card with size, speed, and
@@ -423,11 +435,11 @@ def _register_acquisition_tools(mcp: Any, notifier: DownloadCompletionNotifier) 
                 acquisition_handle, or acquisition_get_query_snapshot.
             save_path: Optional qBittorrent save-path override. Leave unset to
                 use MPilot's inferred media path.
-            query_id: Optional query ID previously returned by
-                acquisition_handle. When the user chooses a numbered result
-                from acquisition_handle or acquisition_get_query_snapshot, pass
-                that same query_id so MPilot preserves the original movie/TV
-                save-path context.
+            query_id: Query ID previously returned by acquisition_handle.
+                Required when the user chooses a numbered result from
+                acquisition_handle or acquisition_get_query_snapshot so MPilot
+                can authorize the verified snapshot result and preserve the
+                original movie/TV save-path context.
             notification_target: Optional Hermes send target such as
                 "telegram:123456789". When set and MPilot can identify the
                 torrent hash, the requester gets a one-time completion notice.

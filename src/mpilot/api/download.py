@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -9,6 +10,11 @@ from fastapi import APIRouter, HTTPException, Request
 from mpilot.api.auth import bind_requester
 from mpilot.acquisition.config import get_settings
 from mpilot.acquisition.domain.download_progress import render_download_status_payload
+from mpilot.acquisition.domain.imdb_identity import (
+    is_downloadable_snapshot_result,
+    validate_imdb_results,
+    validate_title_year,
+)
 from mpilot.acquisition.domain.quality import extract_imdb_id, infer_media_type
 from mpilot.acquisition.domain.save_paths import default_save_path_for_title, validate_save_path_override
 from mpilot.acquisition.domain.torrent_metadata import parse_torrent_name
@@ -20,6 +26,14 @@ from mpilot.acquisition.services.qbittorrent import _download_torrent_file, add_
 
 logger = logging.getLogger("mpilot.acquisition.api.download")
 router = APIRouter()
+
+
+@dataclass(frozen=True)
+class _SnapshotSelection:
+    request_input: str | None
+    search_query: str | None
+    request_context: dict[str, Any]
+    result: SearchResult
 
 
 @router.post(
@@ -61,8 +75,14 @@ async def download(request: DownloadRequest, http_request: Request) -> DownloadR
 
 
 async def _resolve_download_context(request: DownloadRequest, settings) -> tuple[str | None, dict[str, str]]:
-    snapshot_input, snapshot_title, metadata = _snapshot_download_context(request, settings)
-    title = snapshot_title
+    selection = _snapshot_selection(request, settings)
+    snapshot_input = selection.request_input if selection else None
+    snapshot_title = selection.result.title if selection else None
+    metadata = _snapshot_metadata(
+        request_input=snapshot_input,
+        search_query=selection.search_query if selection else None,
+    )
+    title = await _verified_snapshot_title(request.download_link, selection, settings) if selection else None
     if not request.save_path and not title:
         title = await _download_title_from_link(request.download_link, settings)
     result_hints = [SearchResult(title=snapshot_title, download_link=request.download_link)] if snapshot_title else None
@@ -82,8 +102,20 @@ async def _resolve_download_save_path(request: DownloadRequest, settings) -> str
 
 
 def _snapshot_download_context(request: DownloadRequest, settings) -> tuple[str | None, str | None, dict[str, str]]:
-    if not request.query_id:
+    selection = _snapshot_selection(request, settings)
+    if selection is None:
         return None, None, {}
+
+    metadata = _snapshot_metadata(
+        request_input=selection.request_input,
+        search_query=selection.search_query,
+    )
+    return selection.request_input, selection.result.title, metadata
+
+
+def _snapshot_selection(request: DownloadRequest, settings) -> _SnapshotSelection | None:
+    if not request.query_id:
+        return None
 
     try:
         snapshot = QuerySnapshotStore(_query_snapshot_dir(settings)).read(request.query_id)
@@ -96,11 +128,60 @@ def _snapshot_download_context(request: DownloadRequest, settings) -> tuple[str 
 
     request_input = _optional_string(snapshot.request.get("input")) if isinstance(snapshot.request, dict) else None
     search_query = _optional_string(snapshot.request.get("query")) if isinstance(snapshot.request, dict) else None
-    metadata = _snapshot_metadata(request_input=request_input, search_query=search_query)
     selected_result = _find_snapshot_result_by_download_link(snapshot, request.download_link)
     if selected_result is None:
-        return request_input, None, metadata
-    return request_input, selected_result.title, metadata
+        raise ValueError("download_link is not authorized for query_id")
+    if not is_downloadable_snapshot_result(selected_result):
+        raise ValueError("download_link is not verified for query_id")
+    return _SnapshotSelection(
+        request_input=request_input,
+        search_query=search_query,
+        request_context=snapshot.request,
+        result=selected_result,
+    )
+
+
+async def _verified_snapshot_title(
+    download_link: str,
+    selection: _SnapshotSelection,
+    settings,
+) -> str:
+    actual_title = await _download_title_from_link(download_link, settings)
+    if not actual_title:
+        return selection.result.title
+
+    context = selection.request_context
+    canonical_title = _optional_string(context.get("canonical_title"))
+    title_aliases = _title_aliases(context.get("title_aliases"))
+    canonical_year = _optional_year(context.get("canonical_year"))
+    if selection.result.verification_status == "imdb_verified":
+        imdb_id = _optional_string(context.get("imdb_id")) or _optional_string(context.get("query"))
+        media_type = context.get("media_type")
+        if not imdb_id or not canonical_title or media_type not in {"movie", "tv"}:
+            raise ValueError("snapshot identity context is incomplete")
+        validation = validate_imdb_results(
+            [selection.result.model_copy(update={"title": actual_title})],
+            imdb_id=imdb_id,
+            canonical_title=canonical_title,
+            title_aliases=title_aliases,
+            year=canonical_year,
+            media_type=media_type,
+        )
+        if not validation.verified_results:
+            raise ValueError("download payload failed IMDb identity verification")
+    elif (
+        not canonical_title
+        or canonical_year is None
+        or validate_title_year(
+            actual_title,
+            canonical_title=canonical_title,
+            title_aliases=title_aliases,
+            year=canonical_year,
+        )
+        is None
+    ):
+        raise ValueError("download payload failed title/year verification")
+    return selection.result.title
 
 
 def _find_snapshot_result_by_download_link(snapshot, download_link: str):
@@ -128,6 +209,20 @@ def _optional_string(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _optional_year(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if 1800 <= parsed <= 2200 else None
+
+
+def _title_aliases(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return list(dict.fromkeys(item.strip() for item in value if isinstance(item, str) and item.strip()))
 
 
 async def _download_title_from_link(download_link: str, settings) -> str | None:

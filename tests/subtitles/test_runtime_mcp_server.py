@@ -291,6 +291,30 @@ class RuntimeMcpServerTests(unittest.TestCase):
                 "/mnt/media/Movies - HD/Toy Story 2 (1999) [1080p]",
             )
 
+    def test_record_local_video_subtitle_intent_maps_plex_nas_path_via_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "MPILOT_RUNTIME_STORE_DIR": str(Path(tmp)),
+                "MPILOT_RUNTIME_CONTENT_PATH_PREFIX": "/media",
+                "MPILOT_RUNTIME_LOCAL_CONTENT_PATH_PREFIX": "/Volumes/Media Library",
+                "MPILOT_PLEX_PATH_PREFIX": "/volume1/Media Library",
+                "MPILOT_LOCAL_PATH_PREFIX": "/Volumes/Media Library",
+            }
+            with patch.dict("os.environ", env, clear=False):
+                workflow = mcp_server.record_local_video_subtitle_intent(
+                    requester_id="telegram:123",
+                    video_path="/volume1/Media Library/Movies - HD/F1/F1.mkv",
+                    title="F1",
+                    source_language="en",
+                    target_language="fr",
+                    output_mode="single-srt",
+                )
+
+            self.assertEqual(
+                workflow["artifacts"]["video_path"],
+                "/Volumes/Media Library/Movies - HD/F1/F1.mkv",
+            )
+
     def test_record_qbitlarr_download_maps_container_content_path_via_env(self):
         with tempfile.TemporaryDirectory() as tmp:
             store_dir = str(Path(tmp))

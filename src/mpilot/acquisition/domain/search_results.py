@@ -103,6 +103,10 @@ def normalize_search_results(
                 protocol=_to_optional_str(_pick(raw_result, "protocol")),
                 publish_date=_to_optional_str(_pick(raw_result, "publishDate", "publish_date")),
                 info_hash=_to_optional_str(_pick(raw_result, "infoHash", "info_hash")),
+                indexer_id=_to_positive_int(_pick(raw_result, "indexerId", "indexer_id")),
+                source_imdb_id=_to_imdb_id(_pick(raw_result, "imdbId", "imdb_id")),
+                source_tmdb_id=_to_positive_int(_pick(raw_result, "tmdbId", "tmdb_id")),
+                source_tvdb_id=_to_positive_int(_pick(raw_result, "tvdbId", "tvdb_id")),
             )
         )
 
@@ -215,6 +219,27 @@ def _to_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _to_positive_int(value: Any) -> int | None:
+    parsed = _to_int(value)
+    return parsed if parsed is not None and parsed > 0 else None
+
+
+def _to_imdb_id(value: Any) -> str | None:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if re.fullmatch(r"tt\d{6,12}", normalized):
+            return normalized
+        if normalized.isdigit():
+            value = normalized
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric <= 0:
+        return None
+    return f"tt{numeric:07d}"
 
 
 def _to_optional_str(value: Any) -> str | None:

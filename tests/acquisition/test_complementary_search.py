@@ -70,7 +70,7 @@ def _create_snapshot(tmp_path, *, query_id="query-complementary", owner=None, st
             "query": "tt7587282",
             "imdb_id": "tt7587282",
             "media_type": "movie",
-            "categories": [2000, 5000],
+            "categories": [2040, 5040],
         },
         status=status,
         reason="imdb_no_results" if status == "imdb_empty" else "imdb_results_ready",
@@ -79,7 +79,7 @@ def _create_snapshot(tmp_path, *, query_id="query-complementary", owner=None, st
     )
 
 
-def test_validate_complementary_results_requires_ordered_title_and_exact_nonconflicting_year():
+def test_validate_complementary_results_requires_contiguous_title_and_exact_nonconflicting_year():
     valid = _result("Port.Authority.2019.1080p.WEB-DL.H.264", "https://example.test/valid")
     unicode_valid = _result("PORT—AUTHORITY [2019] BluRay", "https://example.test/unicode")
     missing_year = _result("Port Authority 1080p", "https://example.test/missing")
@@ -137,6 +137,8 @@ def test_resolve_imdb_metadata_builds_canonical_contract(monkeypatch, imdb_id, t
                     {
                         "item": {"value": "http://www.wikidata.org/entity/Q1"},
                         "itemLabel": {"value": title},
+                        "alias": {"value": f"{title} Alias"},
+                        "originalTitle": {"value": title},
                         "year": {"value": str(year)},
                         "type": {"value": "http://www.wikidata.org/entity/Q11424"},
                     }
@@ -150,6 +152,7 @@ def test_resolve_imdb_metadata_builds_canonical_contract(monkeypatch, imdb_id, t
     assert metadata == {
         "imdb_id": imdb_id,
         "canonical_title": title,
+        "title_aliases": [f"{title} Alias"],
         "year": year,
         "media_type": "movie",
         "metadata_source": "wikidata",
@@ -172,9 +175,9 @@ def test_zero_raw_imdb_results_returns_two_stage_complementary_action(monkeypatc
 
     assert payload["status"] == "success"
     assert payload["action"] == "complementary_search"
-    assert payload["message"] == (
-        "IMDb ID 搜索已完成，但没有找到结果。现在将自动使用标准标题和年份进行补充搜索。"
-    )
+    assert payload["message_key"] == "imdb_empty_complementary_starting"
+    assert payload["message_params"] == {}
+    assert payload["message"].isascii()
     assert payload["query_id"] == "query-zero"
     assert payload["snapshot_status"] == "imdb_empty"
     assert payload["search_strategy"] == "imdb"
@@ -250,14 +253,14 @@ def test_complementary_endpoint_uses_only_configured_indexers_and_never_download
     assert response.status_code == 200
     assert seen["request"].query == "Port Authority 2019"
     assert seen["request"].indexer_ids == [8, 9]
+    assert seen["request"].categories == [2040, 5040]
+    assert seen["request"].result_resolution == "1080p"
     assert payload["action"] == "show_results"
     assert payload["query_used"] == "Port Authority 2019"
     assert payload["results_verified_by_imdb_id"] is False
-    assert payload["message"] == (
-        "IMDb ID 搜索已完成，但没有找到结果。"
-        "系统随后自动使用标准标题和年份“Port Authority 2019”进行了补充搜索。"
-        "以下结果来自这次补充搜索，未经 IMDb ID 验证，请确认后选择。"
-    )
+    assert payload["message_key"] == "complementary_results_automatic"
+    assert payload["message_params"] == {"query_used": "Port Authority 2019"}
+    assert payload["message"].isascii()
     assert [result["title"] for result in payload["results"]] == [
         "Port.Authority.2019.1080p.WEB-DL.H.264"
     ]
@@ -296,10 +299,9 @@ def test_user_requested_complementary_search_explains_that_results_may_repeat(mo
 
     payload = TestClient(app).post("/queries/query-complementary/complementary-search").json()
 
-    assert payload["message"] == (
-        "已按你的“补充搜索”请求，再次使用标准标题和年份“Port Authority 2019”搜索。"
-        "结果可能与刚才相同，且未经 IMDb ID 验证，请确认后选择。"
-    )
+    assert payload["message_key"] == "complementary_results_user_requested"
+    assert payload["message_params"] == {"query_used": "Port Authority 2019"}
+    assert payload["message"].isascii()
     snapshot = QuerySnapshotStore(str(tmp_path)).read("query-complementary")
     assert snapshot.snapshots[-1].metadata["trigger"] == "user_requested"
 
@@ -321,6 +323,8 @@ def test_complementary_metadata_failure_never_runs_title_only_search(monkeypatch
 
     assert payload["status"] == "not_found"
     assert payload["snapshot_status"] == "complementary_metadata_unavailable"
+    assert payload["message_key"] == "complementary_metadata_unavailable"
+    assert payload["message_params"] == {}
     assert payload["query_used"] is None
 
 
@@ -387,7 +391,15 @@ def test_complementary_endpoint_hides_cross_requester_snapshot(monkeypatch, tmp_
 
 def test_original_query_id_resolves_complementary_download_context(tmp_path):
     _create_snapshot(tmp_path)
-    selected = _result("Port.Authority.2019.1080p.WEB-DL.H.264", "https://example.test/selected")
+    selected = _result(
+        "Port.Authority.2019.1080p.WEB-DL.H.264",
+        "https://example.test/selected",
+    ).model_copy(
+        update={
+            "verification_status": "title_year_validated",
+            "verification_reason": "title_year",
+        }
+    )
     QuerySnapshotStore(str(tmp_path)).append(
         query_id="query-complementary",
         status="complementary_ready",

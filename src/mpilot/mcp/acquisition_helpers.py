@@ -65,7 +65,8 @@ _RAW_CHOICE_RENDER_FIELDS = {
     "ui_hints",
 }
 
-_AGENT_CLARIFY_MAX_ROWS = 4
+_AGENT_CLARIFY_MAX_ROWS = 5
+_COMPLEMENTARY_CHOICE = "🔎"
 _RELEASE_CLARIFY_DISPLAY_NOTICE = (
     "• 🧲: Seed activity; more seeders usually download faster.\n"
     "• 💾: File size; smaller files usually download faster."
@@ -112,7 +113,25 @@ def _agent_clarify_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
     }
     if action == "show_results":
         clarify_payload["display_notice"] = _RELEASE_CLARIFY_DISPLAY_NOTICE
+        if _should_offer_complementary_choice(payload):
+            clarify_payload["choices"].append(_COMPLEMENTARY_CHOICE)
+            clarify_payload["response_mapping"].append(
+                {
+                    "choice": _COMPLEMENTARY_CHOICE,
+                    "response": _COMPLEMENTARY_CHOICE,
+                    "action": "complementary_search",
+                    "query_id": payload.get("query_id"),
+                }
+            )
     return clarify_payload
+
+
+def _should_offer_complementary_choice(payload: dict[str, Any]) -> bool:
+    return (
+        payload.get("search_strategy") == "imdb"
+        and payload.get("results_verified_by_imdb_id") is True
+        and _string_value(payload.get("query_id")) is not None
+    )
 
 
 def _release_clarify_display(

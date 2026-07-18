@@ -14,6 +14,7 @@ from mpilot.acquisition.domain.quality import (
     extract_imdb_id,
     format_choice_label,
     format_quality,
+    is_low_resolution_release,
     normalize_user_message,
     parse_quality,
 )
@@ -27,6 +28,30 @@ CHINESE_TEXT_RE = re.compile(r"[\u4e00-\u9fff]")
 @pytest.fixture(autouse=True)
 def allow_unauthenticated_loopback_for_handle_tests(monkeypatch):
     monkeypatch.setenv("MPILOT_ALLOW_UNAUTHENTICATED_LOOPBACK", "true")
+
+    metadata_by_imdb_id = {
+        "tt0017925": ("Example Show", 2025, "tv"),
+        "tt0045877": ("The Hitch-Hiker", 1953, "movie"),
+        "tt0111161": ("The Shawshank Redemption", 1994, "movie"),
+        "tt26446278": ("Movie", 2024, "movie"),
+        "tt7587282": ("Port Authority", 2019, "movie"),
+    }
+
+    async def resolved_imdb_metadata(imdb_id, settings):
+        resolved = metadata_by_imdb_id.get(imdb_id)
+        if resolved is None:
+            return None
+        title, year, media_type = resolved
+        return {
+            "imdb_id": imdb_id,
+            "canonical_title": title,
+            "title_aliases": [],
+            "year": year,
+            "media_type": media_type,
+            "metadata_source": "test",
+        }
+
+    monkeypatch.setattr("mpilot.api.handle.resolve_imdb_metadata", resolved_imdb_metadata)
 
 
 def _result(title: str, *, seeders: int = 10, link_suffix: str | None = None) -> SearchResult:
@@ -73,6 +98,22 @@ def test_calculate_score_prefers_movie_1080p_webdl_h264_over_other_1080p_release
     assert scores[webdl_h264.title] > scores[webdl_h265.title]
     assert scores[webdl_h265.title] > scores[webrip_h264.title]
     assert scores[webrip_h264.title] > scores[bluray_remux.title]
+
+
+def test_calculate_score_uses_seeders_first_for_single_digit_swarms():
+    scarce_webdl = _result("Movie.2024.1080p.WEB-DL.H.264-GRP", seeders=6)
+    scarce_bluray = _result("Movie.2024.1080p.BluRay.H.264-GRP", seeders=9)
+    healthy_bluray = _result("Movie.2024.1080p.BluRay.H.264-HEALTHY", seeders=46)
+    healthy_webdl = _result("Movie.2024.1080p.WEB-DL.H.264-HEALTHY", seeders=27)
+
+    scarce_webdl_score = calculate_score(scarce_webdl, media_type="movie", prefer_premium=False)
+    scarce_bluray_score = calculate_score(scarce_bluray, media_type="movie", prefer_premium=False)
+    healthy_bluray_score = calculate_score(healthy_bluray, media_type="movie", prefer_premium=False)
+    healthy_webdl_score = calculate_score(healthy_webdl, media_type="movie", prefer_premium=False)
+
+    assert scarce_bluray_score > scarce_webdl_score
+    assert healthy_bluray_score > scarce_webdl_score
+    assert healthy_webdl_score > healthy_bluray_score
 
 
 def test_calculate_score_filters_low_seeders_and_premium_request_prefers_2160p_remux():
@@ -126,6 +167,49 @@ def test_parse_quality_returns_friendlier_quality_label():
     assert format_quality(parsed) == "1080p WEB-DL H.264"
 
 
+def test_parse_quality_recognizes_compact_hd_resolution_marker():
+    parsed = parse_quality("中转站.Port Authority.2019.HD1080P.X264.AAC.English.CHS.mp4")
+
+    assert parsed.resolution == "1080p"
+    assert parsed.codec == "H.264"
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Movie.2026.720p.WEB-DL.x264",
+        "Movie.2026.HD720P50.HDTV.x264",
+        "Movie.2026.1280x720.BluRay.x264",
+        "Movie.2026.1280×720.WEBRip.x265",
+        "Movie.2026.576p.DVDRip.x264",
+        "Movie.2026.480p.WEB-DL.x264",
+        "Movie.2026.DVDRip.x264",
+        "Movie.2026.DVD-Rip.x264",
+        "Movie.2026.DVD5",
+        "Movie.2026.DVD9",
+        "Movie.2026.DVDScr.x264",
+    ],
+)
+def test_is_low_resolution_release_rejects_explicit_low_quality_markers(title):
+    assert is_low_resolution_release(title) is True
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Movie.2026.1080p.HDTV.x264",
+        "Movie.2026.1080p.WEB-DL.x264",
+        "Movie.2026.1080p.BluRay.x265",
+        "Movie.2026.HDTV.x264",
+        "Movie.2026.WEBRip.x264",
+        "Movie.2026.BDRip.x264",
+        "Movie.2026.BRRip.x264",
+    ],
+)
+def test_is_low_resolution_release_keeps_ambiguous_sources_without_low_res_marker(title):
+    assert is_low_resolution_release(title) is False
+
+
 def test_format_quality_uses_english_unknown_label():
     parsed = parse_quality("Some.Release.Without.Quality.Markers-GRP")
 
@@ -139,8 +223,15 @@ def test_normalize_user_message_canonicalizes_imdb_links_from_messengers():
     assert extract_imdb_id(raw_message) == "tt0045877"
 
 
-def test_get_categories_defaults_to_movie_and_tv_parent_categories():
-    assert get_categories("The Hitch-Hiker") == [2000, 5000]
+def test_get_categories_defaults_to_movie_and_tv_hd():
+    assert get_categories("The Hitch-Hiker") == [2040, 5040]
+
+
+def test_get_categories_can_scope_canonical_movie_or_tv_type():
+    assert get_categories("The Hitch-Hiker", media_type="movie") == [2040]
+    assert get_categories("Example Show", media_type="tv") == [5040]
+    assert get_categories("The Hitch-Hiker 4K", media_type="movie") == [2000]
+    assert get_categories("Example Show 4K", media_type="tv") == [5000]
 
 
 @pytest.mark.parametrize(
@@ -167,8 +258,8 @@ def test_get_categories_uses_all_movie_and_tv_categories_for_premium_keywords(me
         "The Hitch-Hiker HDR",
     ],
 )
-def test_get_categories_keeps_parent_categories_for_non_uhd_quality_keywords(message):
-    assert get_categories(message) == [2000, 5000]
+def test_get_categories_keeps_movie_and_tv_hd_for_non_uhd_quality_keywords(message):
+    assert get_categories(message) == [2040, 5040]
 
 
 def _candidate(title, *, imdb_id, year=None):
@@ -332,7 +423,7 @@ def test_handle_keyword_passthrough_preserves_premium_quality_request(monkeypatc
     async def fake_search_prowlarr(request, settings):
         # Premium intent in the keyword still widens the categories on the resolved search.
         assert request.query == "tt0045877"
-        assert request.categories == [2000, 5000]
+        assert request.categories == [2000]
         return [_result("The.Hitch-Hiker.1953.2160p.UHD.BluRay.REMUX.H.265-GRP", seeders=12, link_suffix="remux")]
 
     async def fake_add_download(download_link, settings, *, save_path=None, requester_id=None):
@@ -350,13 +441,106 @@ def test_handle_keyword_passthrough_preserves_premium_quality_request(monkeypatc
     assert response.json()["action"] == "auto_download"
 
 
+def test_handle_imdb_metadata_scopes_movie_search_before_prowlarr(monkeypatch, tmp_path):
+    queued: dict[str, str] = {}
+
+    async def movie_metadata(imdb_id, settings):
+        assert imdb_id == "tt26446278"
+        return {
+            "imdb_id": imdb_id,
+            "canonical_title": "The Count of Monte Cristo",
+            "year": 2024,
+            "media_type": "movie",
+            "metadata_source": "wikidata",
+        }
+
+    async def fake_search_prowlarr(request, settings):
+        assert request.query == "tt26446278"
+        assert request.categories == [2040]
+        assert request.media_type == "movie"
+        return [
+            _result(
+                "The.Count.Of.Monte.Cristo.2024.1080p.WEB-DL.H.264-GRP",
+                seeders=20,
+                link_suffix="monte-cristo",
+            )
+        ]
+
+    async def fake_add_download(download_link, settings, *, save_path=None, requester_id=None):
+        queued["download_link"] = download_link
+        queued["save_path"] = save_path
+
+    monkeypatch.setattr("mpilot.api.handle.resolve_imdb_metadata", movie_metadata)
+    monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
+    monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
+
+    response = TestClient(app).post("/handle", json={"user_message": "tt26446278"})
+
+    assert response.status_code == 200
+    assert response.json()["media_type"] == "movie"
+    assert queued == {
+        "download_link": "https://example.test/monte-cristo.torrent",
+        "save_path": "/downloads/movies",
+    }
+
+
+def test_handle_rejects_unrelated_imdb_keyword_results_before_ranking(monkeypatch, tmp_path):
+    async def fake_search_prowlarr(request, settings):
+        return [
+            _result("IMDB.Top.250.Movies.Collection.2013.1080p", seeders=637),
+            _result("Amazing.Films.8.2013.1080p", seeders=500),
+        ]
+
+    monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
+    monkeypatch.setattr("mpilot.api.handle.create_query_id", lambda: "query-identity-rejected")
+
+    response = TestClient(app).post("/handle", json={"user_message": "tt0045877"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action"] == "complementary_search"
+    assert payload["results"] == []
+    assert payload["results_verified_by_imdb_id"] is False
+    snapshot = QuerySnapshotStore(str(tmp_path)).read("query-identity-rejected")
+    assert snapshot.status == "imdb_empty"
+    assert snapshot.snapshots[0].reason == "imdb_no_identity_verified_results"
+    assert snapshot.snapshots[0].results == []
+    assert snapshot.snapshots[0].metadata["raw_result_count"] == 2
+    assert snapshot.snapshots[0].metadata["identity_verified_count"] == 0
+    assert snapshot.snapshots[0].metadata["identity_rejection_counts"] == {"title_mismatch": 2}
+
+
+def test_handle_fails_closed_when_identity_metadata_is_unavailable(monkeypatch, tmp_path):
+    async def no_metadata(imdb_id, settings):
+        return None
+
+    async def fake_search_prowlarr(request, settings):
+        return [_result("The.Hitch-Hiker.1953.1080p.WEB-DL.H264", seeders=50)]
+
+    monkeypatch.setattr("mpilot.api.handle.resolve_imdb_metadata", no_metadata)
+    monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
+    monkeypatch.setattr("mpilot.api.handle.create_query_id", lambda: "query-identity-unavailable")
+
+    response = TestClient(app).post("/handle", json={"user_message": "tt0045877"})
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "IMDb result identity metadata is unavailable"
+    snapshot = QuerySnapshotStore(str(tmp_path)).read("query-identity-unavailable")
+    assert snapshot.status == "imdb_identity_unavailable"
+    assert snapshot.snapshots[0].results == []
+    assert snapshot.snapshots[0].metadata["raw_result_count"] == 1
+
+
 def test_handle_imdb_id_auto_downloads_best_movie_to_movie_path(monkeypatch, tmp_path):
     queued: dict[str, str] = {}
 
     async def fake_search_prowlarr(request, settings):
         assert request.identifier is None
         assert request.query == "tt0045877"
-        assert request.categories == [2000, 5000]
+        assert request.categories == [2040]
         return [
             _result("The.Hitch-Hiker.1953.1080p.WEBRip.H.264-GRP", seeders=120, link_suffix="webrip"),
             _result("The.Hitch-Hiker.1953.1080p.WEB-DL.H.265-GRP", seeders=80, link_suffix="h265"),
@@ -382,14 +566,14 @@ def test_handle_imdb_id_auto_downloads_best_movie_to_movie_path(monkeypatch, tmp
     assert payload["imdb_id"] == "tt0045877"
     assert payload["media_type"] == "movie"
     assert payload["title"] == "The Hitch-Hiker (1953)"
-    assert payload["quality"] == "1080p WEB-DL H.264"
+    assert payload["quality"] == "1080p WEB-DL H.265"
     assert payload["message"] == (
-        "The Hitch-Hiker (1953) is now downloading with 9 seeders. "
+        "The Hitch-Hiker (1953) is now downloading with 80 seeders. "
         "You can ask for a status update any time."
     )
     _assert_english_message(payload)
     assert queued == {
-        "download_link": "https://example.test/h264.torrent",
+        "download_link": "https://example.test/h265.torrent",
         "save_path": "/downloads/movies",
         "requester_id": "telegram:123456789",
     }
@@ -400,7 +584,7 @@ def test_handle_imdb_id_auto_downloads_4k_movie_to_4k_movie_path(monkeypatch, tm
 
     async def fake_search_prowlarr(request, settings):
         assert request.query == "tt0045877"
-        assert request.categories == [2000, 5000]
+        assert request.categories == [2000]
         return [_result("The.Hitch-Hiker.1953.2160p.UHD.BluRay.REMUX.H.265-GRP", seeders=50, link_suffix="2160")]
 
     async def fake_add_download(download_link, settings, *, save_path=None, requester_id=None):
@@ -425,15 +609,26 @@ def test_handle_imdb_id_auto_downloads_4k_movie_to_4k_movie_path(monkeypatch, tm
 def test_handle_imdb_id_auto_downloads_tv_to_tv_path(monkeypatch, tmp_path):
     queued: dict[str, str] = {}
 
+    async def tv_metadata(imdb_id, settings):
+        return {
+            "imdb_id": imdb_id,
+            "canonical_title": "Example Show",
+            "year": 2025,
+            "media_type": "tv",
+            "metadata_source": "wikidata",
+        }
+
     async def fake_search_prowlarr(request, settings):
         assert request.query == "tt0017925"
-        assert request.categories == [2000, 5000]
+        assert request.categories == [5040]
+        assert request.media_type == "tv"
         return [_result("Example.Show.S03.1080p.AMZN.WEB-DL.H.264-GRP", seeders=50, link_suffix="tv")]
 
     async def fake_add_download(download_link, settings, *, save_path=None, requester_id=None):
         queued["download_link"] = download_link
         queued["save_path"] = save_path
 
+    monkeypatch.setattr("mpilot.api.handle.resolve_imdb_metadata", tv_metadata)
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
     monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings(tmp_path))
@@ -688,7 +883,7 @@ def test_handle_imdb_shared_url_searches_embedded_id_as_keyword(monkeypatch, tmp
     async def fake_search_prowlarr(request, settings):
         assert request.identifier is None
         assert request.query == "tt0045877"
-        assert request.categories == [2000, 5000]
+        assert request.categories == [2040]
         return [_result("The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GRP", seeders=50, link_suffix="h264")]
 
     async def fake_add_download(download_link, settings, *, save_path=None, requester_id=None):
@@ -810,7 +1005,7 @@ def test_handle_keyword_choose_title_label_falls_back_to_title_without_year(monk
 def test_handle_imdb_id_returns_manual_list_when_no_result_meets_seed_threshold(monkeypatch, tmp_path):
     async def fake_search_prowlarr(request, settings):
         assert request.identifier is None
-        assert request.categories == [2000, 5000]
+        assert request.categories == [5040]
         if request.query == "tt0017925":
             return [
                 _result("Example.Show.S03.1080p.AMZN.WEB-DL.H.264-GRP", seeders=4, link_suffix="low"),
@@ -836,9 +1031,8 @@ def test_handle_imdb_id_returns_manual_list_when_no_result_meets_seed_threshold(
     assert payload["action"] == "show_results"
     assert payload["message"] == "No suitable auto-download found. Here are the top results, please reply with the number:"
     _assert_english_message(payload)
-    assert len(payload["results"]) == 2
+    assert len(payload["results"]) == 1
     assert payload["results"][0]["title"] == "Example.Show.S03.1080p.AMZN.WEB-DL.H.264-GRP"
-    assert payload["results"][1]["title"] == "Example.Show.S03.720p.WEB-DL.H.264-GRP"
 
 
 def _settings_with_prefs(tmp_path, **overrides):
@@ -881,10 +1075,102 @@ def test_handle_mode_manual_skips_auto_download_and_returns_ranked_results(monke
     assert payload["action"] == "show_results"
     assert "called" not in queued
     assert payload["results"][0]["title"] == "The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GRP"
-    assert any(result["title"].endswith("720p.BluRay.H.264-GRP") for result in payload["results"])
+    assert len(payload["results"]) == 2
+    assert all("720p" not in result["title"] for result in payload["results"])
 
 
-def test_handle_mode_manual_surfaces_only_lower_quality_imdb_results(monkeypatch, tmp_path):
+def test_handle_mode_manual_ranks_healthy_blurays_before_single_digit_webdls(monkeypatch, tmp_path):
+    async def fake_search_prowlarr(request, settings):
+        results = [
+            _result("Movie.2024.1080p.WEB-DL.H.264-SIX", seeders=6, link_suffix="webdl-6"),
+            _result("Movie.2024.1080p.WEB-DL.H.264-ONE", seeders=1, link_suffix="webdl-1"),
+            _result("Movie.2024.1080p.BluRay.x264-FORTYSIX", seeders=46, link_suffix="bluray-46"),
+            _result("Movie.2024.1080p.BluRay.x264-TWENTYSEVEN", seeders=27, link_suffix="bluray-27"),
+            _result("Movie.2024.1080p.BluRay.x264-TWENTYTWO", seeders=22, link_suffix="bluray-22"),
+        ]
+        return [result.model_copy(update={"size": (index + 1) * 1_000_000}) for index, result in enumerate(results)]
+
+    settings = _settings_with_prefs(tmp_path, default_mode="manual", manual_result_limit=5)
+    monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: settings)
+
+    response = TestClient(app).post("/handle", json={"user_message": "tt26446278"})
+
+    assert response.status_code == 200
+    assert [result["seeders"] for result in response.json()["results"]] == [46, 27, 22, 6, 1]
+
+
+def test_handle_auto_selects_healthy_bluray_over_single_digit_webdl(monkeypatch, tmp_path):
+    queued = {}
+
+    async def fake_search_prowlarr(request, settings):
+        return [
+            _result("Movie.2024.1080p.WEB-DL.H.264-GRP", seeders=6, link_suffix="webdl-6"),
+            _result("Movie.2024.1080p.BluRay.x264-GRP", seeders=46, link_suffix="bluray-46"),
+        ]
+
+    async def fake_add_download(download_link, settings, *, save_path=None, requester_id=None):
+        queued["download_link"] = download_link
+
+    monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
+    monkeypatch.setattr("mpilot.api.handle.add_download_to_qbittorrent", fake_add_download)
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings_with_prefs(tmp_path))
+
+    response = TestClient(app).post("/handle", json={"user_message": "tt26446278"})
+
+    assert response.status_code == 200
+    assert response.json()["action"] == "auto_download"
+    assert queued["download_link"] == "https://example.test/bluray-46.torrent"
+
+
+def test_handle_mode_manual_prefers_direct_peer_links_and_skips_unavailable_http_results(monkeypatch, tmp_path):
+    unavailable_link = "http://prowlarr.test/7/download?link=bad"
+    available_link = "http://prowlarr.test/6/download?link=good"
+    magnet_link = "magnet:?xt=urn:btih:abcdef&dn=The.Hitch-Hiker"
+
+    async def fake_search_prowlarr(request, settings):
+        return [
+            SearchResult(
+                title="The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-BAD",
+                download_link=unavailable_link,
+                seeders=500,
+                size=3_000_000_000,
+                indexer="Unstable",
+            ),
+            SearchResult(
+                title="The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-MAGNET",
+                download_link=magnet_link,
+                seeders=40,
+                size=2_000_000_000,
+                indexer="Direct",
+            ),
+            SearchResult(
+                title="The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GOOD",
+                download_link=available_link,
+                seeders=30,
+                size=1_000_000_000,
+                indexer="Stable",
+            ),
+        ]
+
+    async def fake_source_available(result, settings):
+        return result.download_link != unavailable_link
+
+    settings = _settings_with_prefs(tmp_path, default_mode="manual", manual_result_limit=2)
+    settings.prowlarr_url = "http://prowlarr.test"
+    settings.prowlarr_api_key = "secret"
+    monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
+    monkeypatch.setattr("mpilot.api.handle._is_download_source_available", fake_source_available)
+    monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: settings)
+
+    response = TestClient(app).post("/handle", json={"user_message": "tt0045877"})
+
+    assert response.status_code == 200
+    links = [result["download_link"] for result in response.json()["results"]]
+    assert links == [magnet_link, available_link]
+
+
+def test_handle_mode_manual_excludes_only_lower_quality_imdb_results(monkeypatch, tmp_path):
     async def fake_search_prowlarr(request, settings):
         return [
             _result("Port.Authority.2019.720p.BluRay.H.264-GRP", seeders=2, link_suffix="720p"),
@@ -898,11 +1184,8 @@ def test_handle_mode_manual_surfaces_only_lower_quality_imdb_results(monkeypatch
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "success"
-    assert [result["title"] for result in payload["results"]] == [
-        "Port.Authority.2019.720p.BluRay.H.264-GRP",
-        "Port.Authority.2019.DVDRip.x264-GRP",
-    ]
+    assert payload["status"] == "not_found"
+    assert payload["results"] == []
 
 
 def test_handle_mode_confirm_returns_top_pick_with_alternatives_no_download(monkeypatch, tmp_path):
@@ -988,7 +1271,7 @@ def test_handle_default_mode_env_var_can_force_manual(monkeypatch, tmp_path):
     assert "called" not in queued
 
 
-def test_preference_env_vars_rank_default_match_before_other_resolutions(monkeypatch, tmp_path):
+def test_low_resolution_filter_overrides_720p_preference(monkeypatch, tmp_path):
     async def fake_search_prowlarr(request, settings):
         return [
             _result("The.Hitch-Hiker.1953.720p.WEB-DL.H.265-GRP", seeders=80, link_suffix="720"),
@@ -1011,10 +1294,7 @@ def test_preference_env_vars_rank_default_match_before_other_resolutions(monkeyp
     assert response.status_code == 200
     payload = response.json()
     titles = [r["title"] for r in payload["results"]]
-    assert titles == [
-        "The.Hitch-Hiker.1953.720p.WEB-DL.H.265-GRP",
-        "The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GRP",
-    ]
+    assert titles == ["The.Hitch-Hiker.1953.1080p.WEB-DL.H.264-GRP"]
 
 
 def test_format_choice_label_keeps_differentiators_and_drops_default_resolution():
@@ -1025,6 +1305,16 @@ def test_format_choice_label_keeps_differentiators_and_drops_default_resolution(
 
 
 def test_handle_imdb_manual_results_use_compact_labels_and_dedupe_same_release(monkeypatch, tmp_path):
+    async def in_the_grey_metadata(imdb_id, settings):
+        return {
+            "imdb_id": imdb_id,
+            "canonical_title": "In the Grey",
+            "title_aliases": [],
+            "year": 2026,
+            "media_type": "movie",
+            "metadata_source": "test",
+        }
+
     async def fake_search_prowlarr(request, settings):
         return [
             SearchResult(
@@ -1050,6 +1340,7 @@ def test_handle_imdb_manual_results_use_compact_labels_and_dedupe_same_release(m
             ),
         ]
 
+    monkeypatch.setattr("mpilot.api.handle.resolve_imdb_metadata", in_the_grey_metadata)
     monkeypatch.setattr("mpilot.api.handle.search_prowlarr", fake_search_prowlarr)
     monkeypatch.setattr("mpilot.api.handle.get_settings", lambda: _settings_with_prefs(tmp_path))
 

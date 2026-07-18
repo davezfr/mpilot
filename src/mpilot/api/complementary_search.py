@@ -5,7 +5,13 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 
 from mpilot.api.auth import require_snapshot_owner
-from mpilot.api.handle import _manual_results_response, _manual_result_limit, _choice_style, _preferences
+from mpilot.api.handle import (
+    DEFAULT_SEARCH_CATEGORIES,
+    _choice_style,
+    _manual_result_limit,
+    _manual_results_response,
+    _preferences,
+)
 from mpilot.acquisition.config import get_settings
 from mpilot.acquisition.domain.complementary_search import validate_complementary_results
 from mpilot.acquisition.domain.quality import contains_premium_quality_request, extract_requested_resolution
@@ -20,7 +26,8 @@ logger = logging.getLogger("mpilot.acquisition.api.complementary-search")
 router = APIRouter()
 
 METADATA_UNAVAILABLE_MESSAGE = (
-    "IMDb ID 没有搜索结果，同时无法取得可靠的标准标题和年份，因此没有启动补充搜索。"
+    "The IMDb ID search returned no identity-verified results, but reliable canonical title/year metadata "
+    "was unavailable, so complementary search was not started."
 )
 
 
@@ -53,7 +60,7 @@ async def complementary_search(query_id: str, request: Request) -> HandleRespons
     media_type = _media_type(request_context.get("media_type"))
     categories = request_context.get("categories")
     if not isinstance(categories, list) or not all(isinstance(value, int) for value in categories):
-        categories = [2000, 5000]
+        categories = list(DEFAULT_SEARCH_CATEGORIES)
     trigger = "automatic_empty" if snapshot.status == "imdb_empty" else "user_requested"
 
     try:
@@ -79,6 +86,7 @@ async def complementary_search(query_id: str, request: Request) -> HandleRespons
             status="not_found",
             action="show_results",
             message=METADATA_UNAVAILABLE_MESSAGE,
+            message_key="complementary_metadata_unavailable",
             query_id=query_id,
             snapshot_status="complementary_metadata_unavailable",
             imdb_id=imdb_id,
@@ -93,6 +101,8 @@ async def complementary_search(query_id: str, request: Request) -> HandleRespons
     query_used = f"{canonical_title} {year}"
     media_type = _media_type(metadata.get("media_type")) or media_type
     indexer_ids = list(dict.fromkeys(settings.prowlarr_complementary_indexer_ids or []))
+    original_input = _optional_string(request_context.get("input")) or ""
+    requested_resolution = extract_requested_resolution(original_input)
     entry_metadata = {
         "trigger": trigger,
         "query_used": query_used,
@@ -120,7 +130,12 @@ async def complementary_search(query_id: str, request: Request) -> HandleRespons
 
     try:
         raw_results = await search_prowlarr(
-            SearchRequest(query=query_used, categories=categories, indexer_ids=indexer_ids),
+            SearchRequest(
+                query=query_used,
+                categories=categories,
+                indexer_ids=indexer_ids,
+                result_resolution=requested_resolution or _preferences(settings).resolution,
+            ),
             settings,
         )
     except UpstreamServiceError as exc:
@@ -133,7 +148,13 @@ async def complementary_search(query_id: str, request: Request) -> HandleRespons
         )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    validated = validate_complementary_results(raw_results, canonical_title=canonical_title, year=year)
+    title_aliases = metadata.get("title_aliases") if isinstance(metadata.get("title_aliases"), list) else []
+    validated = validate_complementary_results(
+        raw_results,
+        canonical_title=canonical_title,
+        title_aliases=title_aliases,
+        year=year,
+    )
     snapshot_status = "complementary_ready" if validated else "complementary_empty"
     store.append(
         query_id=query_id,
@@ -151,14 +172,19 @@ async def complementary_search(query_id: str, request: Request) -> HandleRespons
             snapshot_status=snapshot_status,
         )
 
-    original_input = _optional_string(request_context.get("input")) or ""
     return _manual_results_response(
         sorted(validated, key=lambda result: (result.seeders or 0, result.size or 0), reverse=True),
         status="success",
         message=_results_message(trigger=trigger, query_used=query_used),
+        message_key=(
+            "complementary_results_automatic"
+            if trigger == "automatic_empty"
+            else "complementary_results_user_requested"
+        ),
+        message_params={"query_used": query_used},
         media_type=media_type or "movie",
         prefer_premium=contains_premium_quality_request(original_input),
-        requested_resolution=extract_requested_resolution(original_input),
+        requested_resolution=requested_resolution,
         query_id=query_id,
         snapshot_status=snapshot_status,
         preferences=_preferences(settings),
@@ -175,13 +201,13 @@ async def complementary_search(query_id: str, request: Request) -> HandleRespons
 def _results_message(*, trigger: str, query_used: str) -> str:
     if trigger == "automatic_empty":
         return (
-            "IMDb ID 搜索已完成，但没有找到结果。"
-            f'系统随后自动使用标准标题和年份“{query_used}”进行了补充搜索。'
-            "以下结果来自这次补充搜索，未经 IMDb ID 验证，请确认后选择。"
+            "The IMDb ID search returned no identity-verified results. "
+            f'A complementary search was run using the canonical title and year "{query_used}". '
+            "These results are not verified by IMDb ID; review them before choosing."
         )
     return (
-        f'已按你的“补充搜索”请求，再次使用标准标题和年份“{query_used}”搜索。'
-        "结果可能与刚才相同，且未经 IMDb ID 验证，请确认后选择。"
+        f'A complementary search was requested using the canonical title and year "{query_used}". '
+        "Results may repeat earlier choices and are not verified by IMDb ID; review them before choosing."
     )
 
 
@@ -196,7 +222,9 @@ def _empty_response(
     return HandleResponse(
         status="not_found",
         action="show_results",
-        message=f'没有找到符合标准标题和年份“{query_used}”的补充结果。',
+        message=f'No complementary results matched the canonical title and year "{query_used}".',
+        message_key="complementary_no_results",
+        message_params={"query_used": query_used},
         query_id=query_id,
         snapshot_status=snapshot_status,
         imdb_id=imdb_id,

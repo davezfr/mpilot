@@ -127,6 +127,10 @@ def test_search_prowlarr_routes_exact_imdb_id_by_configured_indexer_mode(monkeyp
     )
 
     assert len(results) == 2
+    assert {result.indexer: result.source_search_mode for result in results} == {
+        "Indexer 4": "keyword",
+        "Indexer 5": "native",
+    }
     params = [call["params"] for call in RecordingAsyncClient.calls]
     assert {
         (item["query"], item["type"], tuple(item["indexerIds"]), tuple(item["categories"]))
@@ -135,6 +139,22 @@ def test_search_prowlarr_routes_exact_imdb_id_by_configured_indexer_mode(monkeyp
         ("tt7587282", "search", (4,), (2000, 5000)),
         ("{ImdbId:tt7587282}", "movie", (5, 6), (2000, 5000)),
     }
+
+
+def test_search_prowlarr_uses_tvsearch_for_canonical_tv_imdb(monkeypatch):
+    RecordingAsyncClient.calls = []
+    monkeypatch.setattr("mpilot.acquisition.services.prowlarr.httpx.AsyncClient", RecordingAsyncClient)
+
+    asyncio.run(
+        search_prowlarr(
+            SearchRequest(query="tt7587282", categories=[5000], media_type="tv"),
+            _routed_settings(),
+        )
+    )
+
+    params = [call["params"] for call in RecordingAsyncClient.calls]
+    assert {item["type"] for item in params} == {"search", "tvsearch"}
+    assert all(item["categories"] == [5000] for item in params)
 
 
 def test_search_prowlarr_intersects_imdb_modes_with_requested_indexers(monkeypatch):
@@ -191,4 +211,175 @@ def test_list_prowlarr_indexers_summarizes_native_and_configured_modes(monkeypat
         (4, False),
         (6, False),
         (9, True),
+    ]
+
+
+class CategoryCompatibilityAsyncClient:
+    calls = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def get(self, url, *, params=None, headers=None):
+        type(self).calls.append({"url": url, "params": params, "headers": headers})
+        if url.endswith("/api/v1/indexer"):
+            return FakeProwlarrResponse(
+                [
+                    {
+                        "id": 1,
+                        "name": "HD Source",
+                        "enable": True,
+                        "capabilities": {
+                            "categories": [
+                                {"id": 2000, "subCategories": [{"id": 2040}]},
+                                {"id": 5000, "subCategories": [{"id": 5040}]},
+                            ]
+                        },
+                    },
+                    *[
+                        {
+                            "id": indexer_id,
+                            "name": name,
+                            "enable": True,
+                            "capabilities": {"categories": [{"id": 2000}, {"id": 5000}]},
+                        }
+                        for indexer_id, name in (
+                            (3, "LimeTorrents"),
+                            (6, "Torrentio"),
+                            (7, "TorrentGalaxy"),
+                            (9, "52BT"),
+                        )
+                    ],
+                ]
+            )
+
+        indexer_ids = params["indexerIds"]
+        if indexer_ids == [1]:
+            return FakeProwlarrResponse(
+                [
+                    {
+                        "title": "Port.Authority.2019.1080p.WEB-DL.H.264-HD",
+                        "downloadUrl": "/api/v1/indexer/1/download?link=hd",
+                        "indexer": "HD Source",
+                    },
+                    {
+                        "title": "Port.Authority.2019.DVDRip.x264-MISCATEGORIZED",
+                        "downloadUrl": "/api/v1/indexer/1/download?link=unknown",
+                        "indexer": "HD Source",
+                    },
+                ]
+            )
+        return FakeProwlarrResponse(
+            [
+                {
+                    "title": "中转站.Port Authority.2019.HD1080P.X264.AAC.English.CHS.mp4",
+                    "downloadUrl": "/api/v1/indexer/9/download?link=1080",
+                    "indexer": "52BT",
+                },
+                {
+                    "title": "Port.Authority.2019.720p.BluRay.x264",
+                    "downloadUrl": "/api/v1/indexer/9/download?link=720",
+                    "indexer": "52BT",
+                },
+                {
+                    "title": "Port.Authority.2019.DVDRip.x264",
+                    "downloadUrl": "/api/v1/indexer/9/download?link=unknown",
+                    "indexer": "52BT",
+                },
+            ]
+        )
+
+
+def test_hd_search_routes_parent_only_indexers_and_filters_their_results(monkeypatch):
+    CategoryCompatibilityAsyncClient.calls = []
+    monkeypatch.setattr(
+        "mpilot.acquisition.services.prowlarr.httpx.AsyncClient",
+        CategoryCompatibilityAsyncClient,
+    )
+
+    results = asyncio.run(
+        search_prowlarr(
+            SearchRequest(
+                query="Port Authority 2019",
+                categories=[2040, 5040],
+                indexer_ids=[1, 3, 6, 7, 9],
+                result_resolution="1080p",
+            ),
+            _settings(),
+        )
+    )
+
+    searches = [call["params"] for call in CategoryCompatibilityAsyncClient.calls if call["params"]]
+    assert {
+        (tuple(params["indexerIds"]), tuple(params["categories"]))
+        for params in searches
+    } == {
+        ((1,), (2040, 5040)),
+        ((3, 6, 7, 9), (2000, 5000)),
+    }
+    assert [result.title for result in results] == [
+        "Port.Authority.2019.1080p.WEB-DL.H.264-HD",
+        "中转站.Port Authority.2019.HD1080P.X264.AAC.English.CHS.mp4",
+    ]
+
+
+class MixedMediaResultsAsyncClient:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def get(self, url, *, params=None, headers=None):
+        return FakeProwlarrResponse(
+            [
+                {
+                    "title": "The.Count.Of.Monte.Cristo.2024.1080p.BluRay.x264",
+                    "downloadUrl": "/api/v1/indexer/1/download?link=movie",
+                    "categories": [{"id": 2040, "name": "Movies/HD"}],
+                },
+                {
+                    "title": "The.Count.of.Monte.Cristo.2025.S01.1080p.WEB-DL.x264",
+                    "downloadUrl": "/api/v1/indexer/1/download?link=tv-category",
+                    "categories": [{"id": 5040, "name": "TV/HD"}],
+                },
+                {
+                    "title": "The.Count.of.Monte.Cristo.2025.S01.1080p.WEB-DL.x265",
+                    "downloadUrl": "/api/v1/indexer/1/download?link=tv-title",
+                    "categories": [],
+                },
+                {
+                    "title": "Le.Comte.de.Monte-Cristo.2024.1080p.WEB-DL.x264",
+                    "downloadUrl": "/api/v1/indexer/1/download?link=uncategorized-movie",
+                    "categories": [],
+                },
+            ]
+        )
+
+
+def test_canonical_movie_filter_rejects_tv_categories_and_season_titles(monkeypatch):
+    monkeypatch.setattr(
+        "mpilot.acquisition.services.prowlarr.httpx.AsyncClient",
+        MixedMediaResultsAsyncClient,
+    )
+
+    results = asyncio.run(
+        search_prowlarr(
+            SearchRequest(query="tt26446278", categories=[2000], media_type="movie"),
+            _settings(),
+        )
+    )
+
+    assert [result.title for result in results] == [
+        "The.Count.Of.Monte.Cristo.2024.1080p.BluRay.x264",
+        "Le.Comte.de.Monte-Cristo.2024.1080p.WEB-DL.x264",
     ]

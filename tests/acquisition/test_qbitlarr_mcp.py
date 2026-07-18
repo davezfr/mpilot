@@ -12,6 +12,7 @@ def test_agent_handle_payload_for_release_choices_uses_clarify_safe_fields():
     payload = {
         "status": "success",
         "action": "show_results",
+        "search_strategy": "imdb",
         "results_verified_by_imdb_id": True,
         "message": "Here are the top results, please reply with the number:",
         "choices_table": "1.  WEBRip  H.265  🧲 3635  💾 1.8GB",
@@ -57,19 +58,27 @@ def test_agent_handle_payload_for_release_choices_uses_clarify_safe_fields():
             "• 🧲: Seed activity; more seeders usually download faster.\n"
             "• 💾: File size; smaller files usually download faster."
         ),
-        "choices": ["1", "2"],
+        "choices": ["1", "2", "🔎"],
         "response_mapping": [
             {"choice": "1", "response": "1", "index": 1},
             {"choice": "2", "response": "2", "index": 2},
+            {
+                "choice": "🔎",
+                "response": "🔎",
+                "action": "complementary_search",
+                "query_id": "query-123",
+            },
         ],
     }
 
 
-def test_agent_handle_payload_caps_release_table_for_hermes_clarify():
+def test_agent_handle_payload_returns_five_releases_plus_complementary_action():
     payload = {
         "status": "success",
         "action": "show_results",
+        "search_strategy": "imdb",
         "results_verified_by_imdb_id": True,
+        "query_id": "query-456",
         "message": "Here are the top results, please reply with the number:",
         "results": [
             {
@@ -89,13 +98,20 @@ def test_agent_handle_payload_caps_release_table_for_hermes_clarify():
 
     display_table = agent_payload["agent_clarify"]["display_table"]
     assert "4." in display_table
-    assert "5." not in display_table
-    assert agent_payload["agent_clarify"]["choices"] == ["1", "2", "3", "4"]
+    assert "5." in display_table
+    assert agent_payload["agent_clarify"]["choices"] == ["1", "2", "3", "4", "5", "🔎"]
     assert agent_payload["agent_clarify"]["response_mapping"] == [
         {"choice": "1", "response": "1", "index": 1},
         {"choice": "2", "response": "2", "index": 2},
         {"choice": "3", "response": "3", "index": 3},
         {"choice": "4", "response": "4", "index": 4},
+        {"choice": "5", "response": "5", "index": 5},
+        {
+            "choice": "🔎",
+            "response": "🔎",
+            "action": "complementary_search",
+            "query_id": "query-456",
+        },
     ]
 
 
@@ -103,7 +119,9 @@ def test_agent_handle_payload_for_unverified_results_keeps_title_and_indexer():
     payload = {
         "status": "success",
         "action": "show_results",
+        "search_strategy": "complementary",
         "results_verified_by_imdb_id": False,
+        "query_id": "query-complementary",
         "message": "These results are not IMDb-verified.",
         "choice_buttons": [
             {"index": 1, "text": "1", "value": "1"},

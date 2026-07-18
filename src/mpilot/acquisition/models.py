@@ -47,6 +47,20 @@ class SearchRequest(BaseModel):
     query: str | None = Field(default=None, description="Optional search keywords")
     categories: list[int] | None = Field(default=None, description="Optional Prowlarr category IDs")
     indexer_ids: list[int] | None = Field(default=None, description="Optional Prowlarr indexer IDs")
+    media_type: Literal["movie", "tv"] | None = Field(
+        default=None,
+        description=(
+            "Optional canonical media type. It selects the native Prowlarr search type "
+            "and filters explicitly conflicting result categories locally."
+        ),
+    )
+    result_resolution: str | None = Field(
+        default=None,
+        description=(
+            "Optional resolution required from HD-category searches. "
+            "This is applied locally and is not sent to Prowlarr."
+        ),
+    )
 
 
 class SearchResult(BaseModel):
@@ -60,6 +74,37 @@ class SearchResult(BaseModel):
     protocol: str | None = None
     publish_date: str | None = None
     info_hash: str | None = None
+    indexer_id: int | None = Field(
+        default=None,
+        description="Prowlarr indexer ID retained as result provenance.",
+    )
+    source_imdb_id: str | None = Field(
+        default=None,
+        description="IMDb title ID reported on the individual Prowlarr result, when present.",
+    )
+    source_tmdb_id: int | None = Field(
+        default=None,
+        description="TMDB ID reported on the individual Prowlarr result, when present.",
+    )
+    source_tvdb_id: int | None = Field(
+        default=None,
+        description="TVDB ID reported on the individual Prowlarr result, when present.",
+    )
+    source_search_mode: Literal["native", "keyword"] | None = Field(
+        default=None,
+        description="How this indexer was queried during an IMDb search; this is not identity proof.",
+    )
+    verification_status: Literal["unverified", "imdb_verified", "title_year_validated"] = Field(
+        default="unverified",
+        description=(
+            "Local result admission status. Only imdb_verified and title_year_validated "
+            "snapshot results may be downloaded through a query_id selection."
+        ),
+    )
+    verification_reason: str | None = Field(
+        default=None,
+        description="Machine-readable reason for the local result admission decision.",
+    )
 
 
 class DownloadRequest(BaseModel):
@@ -279,6 +324,17 @@ class HandleResponse(BaseModel):
     status: Literal["success", "not_found"]
     action: Literal["auto_download", "show_results", "confirm", "choose_title", "needs_imdb", "complementary_search"]
     message: str
+    message_key: str | None = Field(
+        default=None,
+        description=(
+            "Language-independent semantic message identifier. Agent hosts should localize this key "
+            "using message_params and the current conversation language; message is an English fallback."
+        ),
+    )
+    message_params: dict[str, str] = Field(
+        default_factory=dict,
+        description="Interpolation values for message_key, such as query_used.",
+    )
     search_strategy: Literal["imdb", "complementary"] | None = Field(
         default=None,
         description="Search identity strategy used for these release results.",
@@ -289,7 +345,10 @@ class HandleResponse(BaseModel):
     )
     results_verified_by_imdb_id: bool | None = Field(
         default=None,
-        description="False for complementary title/year candidates, which are not IMDb-ID verified.",
+        description=(
+            "True only when every displayed result passed MPilot's local IMDb identity gate. "
+            "False for complementary title/year candidates."
+        ),
     )
     choices_table: str | None = Field(
         default=None,

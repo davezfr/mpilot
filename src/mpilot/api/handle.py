@@ -15,6 +15,7 @@ from mpilot.acquisition.domain.quality import (
     QualityPreferences,
     calculate_quality_preference,
     calculate_score,
+    combine_quality_and_swarm_score,
     clean_display_title,
     contains_premium_quality_request,
     extract_imdb_id,
@@ -22,6 +23,7 @@ from mpilot.acquisition.domain.quality import (
     format_choice_label,
     format_quality,
     infer_media_type,
+    is_low_resolution_release,
     normalize_user_message,
     parse_quality,
 )
@@ -33,6 +35,7 @@ from mpilot.acquisition.domain.choice_table import (
     render_unverified_choice_rich_html,
     render_unverified_choice_table,
 )
+from mpilot.acquisition.domain.imdb_identity import validate_imdb_results
 from mpilot.acquisition.domain.save_paths import default_save_path_for_title, validate_save_path_override
 from mpilot.acquisition.domain.torrent_metadata import parse_torrent_name
 from mpilot.acquisition.exceptions import ConfigurationError, UpstreamServiceError
@@ -51,12 +54,17 @@ from mpilot.acquisition.models import (
 from mpilot.acquisition.services.prowlarr import search_prowlarr
 from mpilot.acquisition.services.query_snapshots import QuerySnapshotStore, create_query_id
 from mpilot.acquisition.services.qbittorrent import (
+    _build_torrent_add_payload,
     _download_torrent_file,
     add_download_to_qbittorrent,
     list_downloads_from_qbittorrent,
     tag_download_for_requester,
 )
-from mpilot.acquisition.services.wikidata import resolve_external_movie_id, search_movie_candidates
+from mpilot.acquisition.services.wikidata import (
+    resolve_external_movie_id,
+    resolve_imdb_metadata,
+    search_movie_candidates,
+)
 
 
 logger = logging.getLogger("mpilot.acquisition.api.handle")
@@ -70,12 +78,21 @@ CHOICE_STYLES = {"hermes-default", "telegram-rich"}
 MANUAL_RESULTS_MESSAGE = "Here are the top results, please reply with the number:"
 AUTO_FALLBACK_MESSAGE = "No suitable auto-download found. Here are the top results, please reply with the number:"
 COMPLEMENTARY_TRIGGER_MESSAGE = (
-    "IMDb ID 搜索已完成，但没有找到结果。"
-    "现在将自动使用标准标题和年份进行补充搜索。"
+    "The IMDb ID search returned no identity-verified results. "
+    "A complementary title-and-year search will now be attempted."
 )
-DEFAULT_SEARCH_CATEGORIES = [2000, 5000]
+DEFAULT_SEARCH_CATEGORIES = [2040, 5040]
+FULL_MOVIE_TV_CATEGORIES = [2000, 5000]
+FULL_CATEGORY_KEYWORDS = (
+    "4K",
+    "2160p",
+    "UHD",
+    "REMUX",
+)
 METADATA_VERIFICATION_LIMIT = 10
 METADATA_VERIFICATION_BATCH_SIZE = 2
+MANUAL_AVAILABILITY_BATCH_SIZE = 5
+MANUAL_AVAILABILITY_SCAN_MULTIPLIER = 3
 EXTERNAL_ID_UNRESOLVED_MESSAGE = (
     "I couldn't match that link to a movie reliably. "
     "For faster and more precise results, please send the IMDb link or IMDb ID instead."
@@ -233,40 +250,147 @@ async def _handle_imdb_request(
     requester_id: str | None,
     mode: str = "auto",
 ) -> HandleResponse:
-    base_request = SearchRequest(query=imdb_id, categories=get_categories(user_message))
-    primary_results = await search_prowlarr(base_request, settings)
-    media_type = infer_media_type(user_message, primary_results)
-    if not primary_results:
+    requested_resolution = extract_requested_resolution(user_message)
+    canonical_media_type: MediaType | None = None
+    imdb_metadata: dict | None = None
+    metadata_error: UpstreamServiceError | None = None
+    try:
+        imdb_metadata = await resolve_imdb_metadata(imdb_id, settings)
+    except UpstreamServiceError as exc:
+        metadata_error = exc
+        logger.warning(
+            "IMDb identity metadata lookup failed for imdb_id=%s: %s",
+            imdb_id,
+            exc,
+        )
+    else:
+        resolved_media_type = imdb_metadata.get("media_type") if isinstance(imdb_metadata, dict) else None
+        if resolved_media_type in {"movie", "tv"}:
+            canonical_media_type = resolved_media_type
+
+    base_request = SearchRequest(
+        query=imdb_id,
+        categories=get_categories(user_message, media_type=canonical_media_type),
+        media_type=canonical_media_type,
+        result_resolution=requested_resolution or _preferences(settings).resolution,
+    )
+    raw_results = await search_prowlarr(base_request, settings)
+    media_type = canonical_media_type or infer_media_type(user_message, raw_results)
+    canonical_title = _optional_metadata_string(imdb_metadata, "canonical_title")
+    canonical_year = _optional_metadata_year(imdb_metadata)
+    title_aliases = _metadata_title_aliases(imdb_metadata)
+    snapshot_request = _snapshot_request_payload(
+        user_message=user_message,
+        search_request=base_request,
+        settings=settings,
+        requester_id=requester_id,
+        imdb_id=imdb_id,
+        media_type=media_type,
+        canonical_title=canonical_title,
+        canonical_year=canonical_year,
+        title_aliases=title_aliases,
+    )
+    if not raw_results:
         store.create(
             query_id=query_id,
-            request=_snapshot_request_payload(
-                user_message=user_message,
-                search_request=base_request,
-                settings=settings,
-                requester_id=requester_id,
-                imdb_id=imdb_id,
-                media_type=media_type,
-            ),
+            request=snapshot_request,
             status="imdb_empty",
             reason="imdb_no_results",
             results=[],
-            metadata={"search_strategy": "imdb", "raw_result_count": 0},
+            metadata={
+                "search_strategy": "imdb",
+                "raw_result_count": 0,
+                "identity_verified_count": 0,
+                "identity_rejected_count": 0,
+                "identity_rejection_counts": {},
+            },
         )
         return HandleResponse(
             status="success",
             action="complementary_search",
             message=COMPLEMENTARY_TRIGGER_MESSAGE,
+            message_key="imdb_empty_complementary_starting",
             query_id=query_id,
             snapshot_status="imdb_empty",
             imdb_id=imdb_id,
             media_type=media_type,
             search_strategy="imdb",
-            results_verified_by_imdb_id=True,
+            results_verified_by_imdb_id=False,
+            results=[],
+        )
+
+    identity_metadata_incomplete = (
+        imdb_metadata is None
+        or not canonical_title
+        or (media_type == "movie" and canonical_year is None)
+    )
+    if identity_metadata_incomplete:
+        store.create(
+            query_id=query_id,
+            request=snapshot_request,
+            status="imdb_identity_unavailable",
+            reason="imdb_identity_metadata_unavailable",
+            results=[],
+            metadata={
+                "search_strategy": "imdb",
+                "raw_result_count": len(raw_results),
+                "identity_verified_count": 0,
+                "identity_rejected_count": len(raw_results),
+                "identity_rejection_counts": {"identity_metadata_incomplete": len(raw_results)},
+            },
+        )
+        if metadata_error is not None:
+            raise UpstreamServiceError("IMDb result identity could not be verified") from metadata_error
+        raise UpstreamServiceError("IMDb result identity metadata is unavailable")
+
+    identity_validation = validate_imdb_results(
+        raw_results,
+        imdb_id=imdb_id,
+        canonical_title=canonical_title,
+        title_aliases=title_aliases,
+        year=canonical_year,
+        media_type=media_type,
+    )
+    primary_results = identity_validation.verified_results
+    identity_metadata = {
+        "search_strategy": "imdb",
+        "raw_result_count": len(raw_results),
+        "identity_verified_count": len(primary_results),
+        "identity_rejected_count": identity_validation.rejected_count,
+        "identity_rejection_counts": identity_validation.rejection_counts,
+        "results_verified_by_imdb_id": bool(primary_results),
+    }
+    logger.info(
+        "IMDb identity gate kept %s/%s results for imdb_id=%s (rejections=%s)",
+        len(primary_results),
+        len(raw_results),
+        imdb_id,
+        identity_validation.rejection_counts,
+    )
+    if not primary_results:
+        store.create(
+            query_id=query_id,
+            request=snapshot_request,
+            status="imdb_empty",
+            reason="imdb_no_identity_verified_results",
+            results=[],
+            metadata=identity_metadata,
+        )
+        return HandleResponse(
+            status="success",
+            action="complementary_search",
+            message=COMPLEMENTARY_TRIGGER_MESSAGE,
+            message_key="imdb_empty_complementary_starting",
+            query_id=query_id,
+            snapshot_status="imdb_empty",
+            imdb_id=imdb_id,
+            media_type=media_type,
+            search_strategy="imdb",
+            results_verified_by_imdb_id=False,
             results=[],
         )
 
     prefer_premium = contains_premium_quality_request(user_message)
-    requested_resolution = extract_requested_resolution(user_message)
     preferences = _preferences(settings)
     skip_existing_check = mode == "manual"
     existing_download = None
@@ -290,17 +414,11 @@ async def _handle_imdb_request(
         )
         store.create(
             query_id=query_id,
-            request=_snapshot_request_payload(
-                user_message=user_message,
-                search_request=base_request,
-                settings=settings,
-                requester_id=requester_id,
-                imdb_id=imdb_id,
-                media_type=media_type,
-            ),
+            request=snapshot_request,
             status="already_in_qbittorrent",
             reason="matching_download_exists",
             results=primary_ranked,
+            metadata=identity_metadata,
         )
         display_title = clean_display_title(existing_download.name)
         quality = format_quality(parse_quality(existing_download.name))
@@ -331,13 +449,6 @@ async def _handle_imdb_request(
             alternatives=_to_manual_results(primary_ranked[:_INLINE_ALTERNATIVE_LIMIT], compact_labels=True) or None,
         )
 
-    selected = await _select_best_verified_result(
-        primary_results,
-        settings,
-        media_type=media_type,
-        prefer_premium=prefer_premium,
-        requested_resolution=requested_resolution,
-    )
     primary_ranked = _rank_results(
         primary_results,
         media_type=media_type,
@@ -348,23 +459,21 @@ async def _handle_imdb_request(
     )
     snapshot_status = "imdb_ready"
 
-    store.create(
-        query_id=query_id,
-        request=_snapshot_request_payload(
-            user_message=user_message,
-            search_request=base_request,
-            settings=settings,
-            requester_id=requester_id,
-            imdb_id=imdb_id,
-            media_type=media_type,
-        ),
-        status=snapshot_status,
-        reason="imdb_results_ready",
-        results=primary_ranked,
-        metadata={"search_strategy": "imdb", "raw_result_count": len(primary_results)},
-    )
-
     if mode == "manual":
+        manual_result_limit = _manual_result_limit(settings)
+        primary_ranked = await _available_manual_results(
+            primary_ranked,
+            settings,
+            limit=manual_result_limit,
+        )
+        store.create(
+            query_id=query_id,
+            request=snapshot_request,
+            status=snapshot_status,
+            reason="imdb_results_ready",
+            results=primary_ranked,
+            metadata=identity_metadata,
+        )
         return _manual_results_response(
             primary_ranked,
             status="success" if primary_ranked else "not_found",
@@ -376,12 +485,36 @@ async def _handle_imdb_request(
             snapshot_status="imdb_ready",
             preferences=preferences,
             compact_labels=True,
-            manual_result_limit=_manual_result_limit(settings),
+            manual_result_limit=manual_result_limit,
             choice_style=_choice_style(settings),
             imdb_id=imdb_id,
             search_strategy="imdb",
             results_verified_by_imdb_id=True,
+            preserve_order=True,
         )
+
+    selected = await _select_best_verified_result(
+        primary_results,
+        settings,
+        media_type=media_type,
+        prefer_premium=prefer_premium,
+        requested_resolution=requested_resolution,
+        identity_context={
+            "imdb_id": imdb_id,
+            "canonical_title": canonical_title,
+            "title_aliases": title_aliases,
+            "year": canonical_year,
+            "media_type": media_type,
+        },
+    )
+    store.create(
+        query_id=query_id,
+        request=snapshot_request,
+        status=snapshot_status,
+        reason="imdb_results_ready",
+        results=primary_ranked,
+        metadata=identity_metadata,
+    )
 
     if not selected:
         logger.info(
@@ -560,12 +693,75 @@ def _dedupe_same_release(results: list[SearchResult]) -> list[SearchResult]:
     seen: set[tuple[str, int | None]] = set()
     deduped = []
     for result in results:
-        key = (format_choice_label(parse_quality(result.title)), result.size)
+        key = _manual_release_key(result)
         if key in seen:
             continue
         seen.add(key)
         deduped.append(result)
     return deduped
+
+
+def _manual_release_key(result: SearchResult) -> tuple[str, int | None]:
+    return format_choice_label(parse_quality(result.title)), result.size
+
+
+async def _available_manual_results(
+    results: list[SearchResult],
+    settings: Settings,
+    *,
+    limit: int,
+) -> list[SearchResult]:
+    if not _manual_availability_checks_enabled(settings):
+        return results
+
+    direct_peer_results = [result for result in results if _is_direct_peer_link(result.download_link)]
+    http_results = [result for result in results if not _is_direct_peer_link(result.download_link)]
+    available: list[SearchResult] = []
+    seen: set[tuple[str, int | None]] = set()
+
+    def keep(result: SearchResult) -> None:
+        key = _manual_release_key(result)
+        if key not in seen:
+            seen.add(key)
+            available.append(result)
+
+    for result in direct_peer_results:
+        keep(result)
+        if len(available) >= limit:
+            return available
+
+    max_http_checks = max(limit, limit * MANUAL_AVAILABILITY_SCAN_MULTIPLIER)
+    http_candidates = http_results[:max_http_checks]
+    for start in range(0, len(http_candidates), MANUAL_AVAILABILITY_BATCH_SIZE):
+        batch = http_candidates[start : start + MANUAL_AVAILABILITY_BATCH_SIZE]
+        checks = await asyncio.gather(*(_is_download_source_available(result, settings) for result in batch))
+        for result, is_available in zip(batch, checks):
+            if is_available:
+                keep(result)
+            if len(available) >= limit:
+                return available
+
+    return available
+
+
+def _manual_availability_checks_enabled(settings: Settings) -> bool:
+    return bool(
+        str(getattr(settings, "prowlarr_url", "") or "").strip()
+        and str(getattr(settings, "prowlarr_api_key", "") or "").strip()
+    )
+
+
+def _is_direct_peer_link(download_link: str) -> bool:
+    return urlparse(download_link).scheme.lower() in {"magnet", "bc"}
+
+
+async def _is_download_source_available(result: SearchResult, settings: Settings) -> bool:
+    try:
+        await _build_torrent_add_payload(result.download_link, settings)
+    except UpstreamServiceError:
+        logger.info("Skipping unavailable manual result indexer=%s", result.indexer or "unknown")
+        return False
+    return True
 
 
 _INLINE_ALTERNATIVE_LIMIT = 3
@@ -600,6 +796,7 @@ async def _select_best_verified_result(
     media_type: MediaType,
     prefer_premium: bool,
     requested_resolution: str | None = None,
+    identity_context: dict | None = None,
 ) -> SearchResult | None:
     preferences = _preferences(settings)
     ranked_results = _rank_results(
@@ -638,7 +835,17 @@ async def _select_best_verified_result(
         )
         for original_score, verified_result in zip(original_scores, verified_results):
             if best_score is not None and original_score is not None and best_score >= original_score:
-                return best_result or ranked_results[0]
+                return best_result
+
+            if identity_context is not None:
+                identity_validation = validate_imdb_results([verified_result], **identity_context)
+                if not identity_validation.verified_results:
+                    logger.info(
+                        "Skipping torrent metadata title that failed IMDb identity verification: %s",
+                        verified_result.title,
+                    )
+                    continue
+                verified_result = identity_validation.verified_results[0]
 
             verified_score = calculate_score(
                 verified_result,
@@ -651,6 +858,8 @@ async def _select_best_verified_result(
                 best_score = verified_score
                 best_result = verified_result
 
+    if identity_context is not None:
+        return best_result
     return best_result or ranked_results[0]
 
 
@@ -760,9 +969,18 @@ def _pluralize_seeder(seeders: int) -> str:
     return "seeder" if seeders == 1 else "seeders"
 
 
-def get_categories(user_message: str) -> list[int]:
-    del user_message
-    return list(DEFAULT_SEARCH_CATEGORIES)
+def get_categories(user_message: str, *, media_type: MediaType | None = None) -> list[int]:
+    normalized_message = user_message.casefold()
+    if any(keyword.casefold() in normalized_message for keyword in FULL_CATEGORY_KEYWORDS):
+        categories = FULL_MOVIE_TV_CATEGORIES
+    else:
+        categories = DEFAULT_SEARCH_CATEGORIES
+
+    if media_type == "movie":
+        return [category for category in categories if category // 1000 == 2]
+    if media_type == "tv":
+        return [category for category in categories if category // 1000 == 5]
+    return list(categories)
 
 
 def _needs_imdb_response(
@@ -873,15 +1091,20 @@ def _manual_results_response(
     search_strategy: str | None = None,
     query_used: str | None = None,
     results_verified_by_imdb_id: bool | None = None,
+    message_key: str | None = None,
+    message_params: dict[str, str] | None = None,
+    preserve_order: bool = False,
 ) -> HandleResponse:
-    ranked_results = _rank_results(
-        results,
-        media_type=media_type,
-        prefer_premium=prefer_premium,
-        requested_resolution=requested_resolution,
-        require_min_seeders=False,
-        preferences=preferences,
-    )
+    ranked_results = results
+    if not preserve_order:
+        ranked_results = _rank_results(
+            results,
+            media_type=media_type,
+            prefer_premium=prefer_premium,
+            requested_resolution=requested_resolution,
+            require_min_seeders=False,
+            preferences=preferences,
+        )
     manual_results = _to_manual_results(
         ranked_results,
         compact_labels=compact_labels,
@@ -903,6 +1126,8 @@ def _manual_results_response(
         status=status,
         action="show_results",
         message=message,
+        message_key=message_key,
+        message_params=message_params or {},
         choices_table=choices_table,
         choice_display=choice_display,
         choice_buttons=_choice_buttons(manual_results) if manual_results else None,
@@ -1008,6 +1233,8 @@ def _rank_results(
 ) -> list[SearchResult]:
     ranked: list[tuple[int, int, int, SearchResult]] = []
     for result in results:
+        if is_low_resolution_release(result.title):
+            continue
         rank_score = _result_rank_score(
             result,
             media_type=media_type,
@@ -1054,7 +1281,7 @@ def _result_rank_score(
     if preference_score is None:
         return None
 
-    return preference_score + min(result.seeders or 0, 99)
+    return combine_quality_and_swarm_score(preference_score, result.seeders)
 
 
 def _snapshot_request_payload(
@@ -1065,6 +1292,9 @@ def _snapshot_request_payload(
     requester_id: str | None,
     imdb_id: str | None = None,
     media_type: MediaType | None = None,
+    canonical_title: str | None = None,
+    canonical_year: int | None = None,
+    title_aliases: list[str] | None = None,
 ) -> dict:
     del settings
     return {
@@ -1075,7 +1305,33 @@ def _snapshot_request_payload(
         "categories": search_request.categories,
         "imdb_id": imdb_id,
         "media_type": media_type,
+        "canonical_title": canonical_title,
+        "canonical_year": canonical_year,
+        "title_aliases": list(title_aliases or []),
     }
+
+
+def _optional_metadata_string(metadata: dict | None, key: str) -> str | None:
+    value = metadata.get(key) if isinstance(metadata, dict) else None
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _optional_metadata_year(metadata: dict | None) -> int | None:
+    value = metadata.get("year") if isinstance(metadata, dict) else None
+    try:
+        year = int(value)
+    except (TypeError, ValueError):
+        return None
+    return year if 1800 <= year <= 2200 else None
+
+
+def _metadata_title_aliases(metadata: dict | None) -> list[str]:
+    values = metadata.get("title_aliases") if isinstance(metadata, dict) else None
+    if not isinstance(values, list):
+        return []
+    return list(
+        dict.fromkeys(value.strip() for value in values if isinstance(value, str) and value.strip())
+    )
 
 
 def _query_snapshot_dir(settings: Settings) -> str:

@@ -7,15 +7,20 @@ import re
 import httpx
 
 from mpilot.acquisition.config import Settings
+from mpilot.acquisition.domain.quality import extract_imdb_id, normalize_user_message, parse_quality
 from mpilot.acquisition.domain.search_results import build_prowlarr_search_params, normalize_search_results
 from mpilot.acquisition.exceptions import UpstreamServiceError
-from mpilot.acquisition.domain.quality import extract_imdb_id, normalize_user_message
 from mpilot.acquisition.models import IndexerImdbSearchMode, ProwlarrIndexer, SearchRequest, SearchResult
 
 
 logger = logging.getLogger("qbitlarr-api.prowlarr")
 PROWLARR_SEARCH_MAX_ATTEMPTS = 2
 _BARE_IMDB_RE = re.compile(r"^(?:imdb:)?(tt\d{6,12})$", flags=re.IGNORECASE)
+_HD_PARENT_CATEGORIES = {2040: 2000, 5040: 5000}
+_TV_RELEASE_MARKER_RE = re.compile(
+    r"\b(?:S\d{1,2}(?:E\d{1,3})?|Season\s+\d{1,2}|Complete\s+Season)\b",
+    flags=re.IGNORECASE,
+)
 
 
 async def search_prowlarr(
@@ -45,30 +50,36 @@ async def _search_imdb_by_indexer_mode(
     searches = []
     if keyword_ids:
         searches.append(
-            _search_prowlarr_once(
-                request.model_copy(
-                    update={
-                        "identifier": None,
-                        "query": imdb_id,
-                        "indexer_ids": keyword_ids,
-                    }
+            (
+                "keyword",
+                _search_prowlarr_once(
+                    request.model_copy(
+                        update={
+                            "identifier": None,
+                            "query": imdb_id,
+                            "indexer_ids": keyword_ids,
+                        }
+                    ),
+                    settings,
+                    search_type="search",
                 ),
-                settings,
-                search_type="search",
             )
         )
     if native_ids:
         searches.append(
-            _search_prowlarr_once(
-                request.model_copy(
-                    update={
-                        "identifier": None,
-                        "query": f"{{ImdbId:{imdb_id}}}",
-                        "indexer_ids": native_ids,
-                    }
+            (
+                "native",
+                _search_prowlarr_once(
+                    request.model_copy(
+                        update={
+                            "identifier": None,
+                            "query": f"{{ImdbId:{imdb_id}}}",
+                            "indexer_ids": native_ids,
+                        }
+                    ),
+                    settings,
+                    search_type=_native_imdb_search_type(request),
                 ),
-                settings,
-                search_type="movie",
             )
         )
 
@@ -76,8 +87,12 @@ async def _search_imdb_by_indexer_mode(
         logger.info("No configured IMDb-capable indexers are in scope for imdb_id=%s", imdb_id)
         return []
 
-    groups = await asyncio.gather(*searches)
-    merged = _merge_search_results(groups)
+    groups = await asyncio.gather(*(search for _mode, search in searches))
+    tagged_groups = [
+        [result.model_copy(update={"source_search_mode": mode}) for result in group]
+        for (mode, _search), group in zip(searches, groups)
+    ]
+    merged = _merge_search_results(tagged_groups)
     logger.info(
         "IMDb-routed Prowlarr search returned %s usable results (keyword_ids=%s native_ids=%s)",
         len(merged),
@@ -92,6 +107,48 @@ async def _search_prowlarr_once(
     settings: Settings,
     *,
     search_type: str = "search",
+) -> list[SearchResult]:
+    compatibility_groups = await _hd_category_compatibility_groups(request, settings)
+    if compatibility_groups is not None:
+        hd_ids, parent_ids = compatibility_groups
+        searches = []
+        if hd_ids:
+            searches.append(
+                _search_resolution_filtered_results(
+                    request.model_copy(update={"indexer_ids": hd_ids}),
+                    settings,
+                    search_type=search_type,
+                )
+            )
+        if parent_ids:
+            parent_categories = list(
+                dict.fromkeys(
+                    _HD_PARENT_CATEGORIES[category]
+                    for category in request.categories or []
+                    if category in _HD_PARENT_CATEGORIES
+                )
+            )
+            searches.append(
+                _search_resolution_filtered_results(
+                    request.model_copy(
+                        update={"categories": parent_categories, "indexer_ids": parent_ids}
+                    ),
+                    settings,
+                    search_type=search_type,
+                )
+            )
+        if searches:
+            return _merge_search_results(await asyncio.gather(*searches))
+        return []
+
+    return await _search_prowlarr_request(request, settings, search_type=search_type)
+
+
+async def _search_prowlarr_request(
+    request: SearchRequest,
+    settings: Settings,
+    *,
+    search_type: str,
 ) -> list[SearchResult]:
     params = build_prowlarr_search_params(request, search_type=search_type)
     url = f"{settings.prowlarr_url}/api/v1/search"
@@ -124,14 +181,161 @@ async def _search_prowlarr_once(
     if not isinstance(payload, list):
         raise UpstreamServiceError("Prowlarr returned an unexpected response shape")
 
+    filtered_payload = _filter_payload_by_media_type(payload, request.media_type)
     results = normalize_search_results(
-        payload,
+        filtered_payload,
         prowlarr_url=settings.prowlarr_url,
         prowlarr_download_url=settings.prowlarr_download_url,
         prowlarr_api_key=settings.prowlarr_api_key,
     )
     logger.info("Prowlarr search returned %s usable results", len(results))
     return results
+
+
+def _native_imdb_search_type(request: SearchRequest) -> str:
+    return "tvsearch" if request.media_type == "tv" else "movie"
+
+
+def _filter_payload_by_media_type(payload: list, media_type: str | None) -> list:
+    if media_type not in {"movie", "tv"}:
+        return payload
+
+    filtered = []
+    for item in payload:
+        if not isinstance(item, dict):
+            filtered.append(item)
+            continue
+
+        category_ids = _raw_result_category_ids(item)
+        has_movie_category = any(category_id // 1000 == 2 for category_id in category_ids)
+        has_tv_category = any(category_id // 1000 == 5 for category_id in category_ids)
+        title = str(item.get("title") or item.get("fileName") or "")
+
+        if media_type == "movie" and (has_tv_category or _TV_RELEASE_MARKER_RE.search(title)):
+            continue
+        if media_type == "tv" and has_movie_category and not has_tv_category:
+            continue
+        filtered.append(item)
+
+    if len(filtered) != len(payload):
+        logger.info(
+            "Canonical media-type filter kept %s/%s Prowlarr results for media_type=%s",
+            len(filtered),
+            len(payload),
+            media_type,
+        )
+    return filtered
+
+
+def _raw_result_category_ids(item: dict) -> set[int]:
+    category_ids: set[int] = set()
+    stack = list(item.get("categories") or [])
+    while stack:
+        category = stack.pop()
+        if isinstance(category, dict):
+            try:
+                category_ids.add(int(category["id"]))
+            except (KeyError, TypeError, ValueError):
+                pass
+            children = category.get("subCategories")
+            if isinstance(children, list):
+                stack.extend(children)
+            continue
+        try:
+            category_ids.add(int(category))
+        except (TypeError, ValueError):
+            pass
+    return category_ids
+
+
+async def _search_resolution_filtered_results(
+    request: SearchRequest,
+    settings: Settings,
+    *,
+    search_type: str,
+) -> list[SearchResult]:
+    results = await _search_prowlarr_request(request, settings, search_type=search_type)
+    required_resolution = request.result_resolution or getattr(settings, "prefer_resolution", "1080p")
+    filtered = [result for result in results if parse_quality(result.title).resolution == required_resolution]
+    logger.info(
+        "HD resolution filter kept %s/%s %s results (indexer_ids=%s categories=%s)",
+        len(filtered),
+        len(results),
+        required_resolution,
+        request.indexer_ids,
+        request.categories,
+    )
+    return filtered
+
+
+async def _hd_category_compatibility_groups(
+    request: SearchRequest,
+    settings: Settings,
+) -> tuple[list[int], list[int]] | None:
+    requested_categories = request.categories or []
+    if not requested_categories or any(category not in _HD_PARENT_CATEGORIES for category in requested_categories):
+        return None
+
+    try:
+        payload = await _get_prowlarr_json(f"{settings.prowlarr_url}/api/v1/indexer", settings)
+    except UpstreamServiceError:
+        logger.warning("Could not inspect indexer category capabilities; using the original HD search")
+        return None
+    if not isinstance(payload, list):
+        return None
+
+    requested_ids = set(request.indexer_ids) if request.indexer_ids is not None else None
+    hd_ids: list[int] = []
+    parent_ids: list[int] = []
+    enabled_ids: list[int] = []
+    requested_hd = set(requested_categories)
+    requested_parents = {_HD_PARENT_CATEGORIES[category] for category in requested_categories}
+    for item in payload:
+        if not isinstance(item, dict) or item.get("enable", item.get("enabled", True)) is False:
+            continue
+        try:
+            indexer_id = int(item["id"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if requested_ids is not None and indexer_id not in requested_ids:
+            continue
+        enabled_ids.append(indexer_id)
+        supported_categories = _indexer_category_ids(item)
+        if supported_categories & requested_hd:
+            hd_ids.append(indexer_id)
+        elif supported_categories & requested_parents:
+            parent_ids.append(indexer_id)
+
+    classified = set(hd_ids) | set(parent_ids)
+    requested_order = request.indexer_ids if request.indexer_ids is not None else enabled_ids
+    hd_ids.extend(indexer_id for indexer_id in requested_order if indexer_id not in classified)
+
+    logger.info(
+        "HD category routing selected native_hd_ids=%s parent_category_ids=%s",
+        hd_ids,
+        parent_ids,
+    )
+    return hd_ids, parent_ids
+
+
+def _indexer_category_ids(item: dict) -> set[int]:
+    capabilities = item.get("capabilities")
+    if not isinstance(capabilities, dict):
+        return set()
+    category_ids: set[int] = set()
+    stack = list(capabilities.get("categories") or [])
+    while stack:
+        category = stack.pop()
+        if not isinstance(category, dict):
+            continue
+        try:
+            category_ids.add(int(category["id"]))
+        except (KeyError, TypeError, ValueError):
+            pass
+        children = category.get("subCategories")
+        if isinstance(children, list):
+            stack.extend(children)
+    return category_ids
 
 
 async def list_prowlarr_indexers(settings: Settings) -> list[ProwlarrIndexer]:
