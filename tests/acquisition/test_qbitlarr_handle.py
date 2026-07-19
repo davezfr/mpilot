@@ -262,16 +262,22 @@ def test_get_categories_keeps_movie_and_tv_hd_for_non_uhd_quality_keywords(messa
     assert get_categories(message) == [2040, 5040]
 
 
-def _candidate(title, *, imdb_id, year=None):
-    return {"title": title, "year": year, "imdb_id": imdb_id, "wikidata_qid": None}
+def _candidate(title, *, imdb_id, year=None, media_type="movie"):
+    return {
+        "title": title,
+        "year": year,
+        "imdb_id": imdb_id,
+        "wikidata_qid": None,
+        "media_type": media_type,
+    }
 
 
 def test_handle_keyword_with_multiple_candidates_returns_choose_title(monkeypatch, tmp_path):
     async def fake_candidates(query, settings, *, limit=5):
-        assert query == "The Hitch-Hiker"
+        assert query == "The Martian"
         return [
-            _candidate("The Hitch-Hiker", imdb_id="tt0045877", year=1953),
-            _candidate("The Hitchhiker's Guide to the Galaxy", imdb_id="tt0371724", year=2005),
+            _candidate("The Martian Chronicles", imdb_id="tt0080242", year=1980, media_type="tv"),
+            _candidate("The Martian", imdb_id="tt3659388", year=2015),
         ]
 
     async def unexpected_search_prowlarr(request, settings):
@@ -283,7 +289,7 @@ def test_handle_keyword_with_multiple_candidates_returns_choose_title(monkeypatc
     monkeypatch.setattr("mpilot.api.handle.create_query_id", lambda: "query-titles")
 
     client = TestClient(app)
-    response = client.post("/handle", json={"user_message": "The Hitch-Hiker"})
+    response = client.post("/handle", json={"user_message": "The Martian"})
 
     assert response.status_code == 200
     payload = response.json()
@@ -295,19 +301,20 @@ def test_handle_keyword_with_multiple_candidates_returns_choose_title(monkeypatc
     assert payload["results"] is None
     assert [c["index"] for c in payload["candidates"]] == [1, 2]
     assert [c["label"] for c in payload["candidates"]] == [
-        "The Hitch-Hiker (1953)",
-        "The Hitchhiker's Guide to the Galaxy (2005)",
+        "📺 The Martian Chronicles (1980)",
+        "🎬 The Martian (2015)",
     ]
-    assert payload["candidates"][0]["imdb_id"] == "tt0045877"
+    assert [c["media_type"] for c in payload["candidates"]] == ["tv", "movie"]
+    assert payload["candidates"][0]["imdb_id"] == "tt0080242"
     assert payload["choices_table"] == (
-        "1. The Hitch-Hiker (1953)\n"
-        "2. The Hitchhiker's Guide to the Galaxy (2005)"
+        "1. 📺 The Martian Chronicles (1980)\n"
+        "2. 🎬 The Martian (2015)"
     )
     assert payload["choice_display"] == (
         "I found a few possible matches. Reply with the number of the title you mean:\n\n"
         "```text\n"
-        "1. The Hitch-Hiker (1953)\n"
-        "2. The Hitchhiker's Guide to the Galaxy (2005)\n"
+        "1. 📺 The Martian Chronicles (1980)\n"
+        "2. 🎬 The Martian (2015)\n"
         "```"
     )
     assert payload["choice_buttons"] == [
@@ -317,7 +324,9 @@ def test_handle_keyword_with_multiple_candidates_returns_choose_title(monkeypatc
     assert payload["ui_hints"]["closed_choice"] is True
     assert payload["choice_rich_message"]["format"] == "telegram-html"
     assert "<caption>Title choices</caption>" in payload["choice_rich_message"]["html"]
-    assert "tt0045877" not in payload["choice_rich_message"]["html"]
+    assert "tt0080242" not in payload["choice_rich_message"]["html"]
+    assert "📺 The Martian Chronicles" in payload["choice_rich_message"]["html"]
+    assert "🎬 The Martian" in payload["choice_rich_message"]["html"]
 
 
 def test_handle_keyword_with_single_candidate_passes_through_to_release_search(monkeypatch, tmp_path):
@@ -998,8 +1007,8 @@ def test_handle_keyword_choose_title_label_falls_back_to_title_without_year(monk
     assert response.status_code == 200
     payload = response.json()
     assert payload["action"] == "choose_title"
-    assert payload["candidates"][0]["label"] == "Some Untitled Doc"
-    assert payload["candidates"][1]["label"] == "Another Match (2011)"
+    assert payload["candidates"][0]["label"] == "🎬 Some Untitled Doc"
+    assert payload["candidates"][1]["label"] == "🎬 Another Match (2011)"
 
 
 def test_handle_imdb_id_returns_manual_list_when_no_result_meets_seed_threshold(monkeypatch, tmp_path):
@@ -1650,8 +1659,8 @@ def test_handle_keyword_choose_title_telegram_rich_omits_raw_table_and_markdown(
     assert payload["choices_table"] is None
     assert payload["choice_display"] == (
         "I found a few possible matches. Reply with the number of the title you mean:\n\n"
-        "1. Parasite (2019)\n"
-        "2. Parasite (1982)"
+        "1. 🎬 Parasite (2019)\n"
+        "2. 🎬 Parasite (1982)"
     )
     assert "```text" not in payload["choice_display"]
     assert "1. 1." not in payload["choice_display"]
@@ -1678,7 +1687,7 @@ def test_handle_keyword_choose_title_uses_title_choice_table(monkeypatch, tmp_pa
     assert response.status_code == 200
     payload = response.json()
     assert payload["action"] == "choose_title"
-    assert payload["choices_table"] == "1. Parasite (2019)\n2. Parasite (1982)"
+    assert payload["choices_table"] == "1. 🎬 Parasite (2019)\n2. 🎬 Parasite (1982)"
     assert payload["choice_display"].startswith("I found a few possible matches.")
     assert "```text" in payload["choice_display"]
     assert len(payload["choice_buttons"]) == 2

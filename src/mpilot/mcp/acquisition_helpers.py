@@ -197,6 +197,7 @@ def _title_clarify_display(candidates: Any) -> tuple[str | None, list[dict[str, 
                 title=title or label,
                 year=candidate.get("year") if isinstance(candidate.get("year"), int) else None,
                 imdb_id=_string_value(candidate.get("imdb_id")) or "",
+                media_type=candidate.get("media_type"),
                 label=label,
             )
         )

@@ -78,8 +78,10 @@ async def search_movie_candidates(
     Wikidata entity search finds items that carry an IMDb *title* ID (``tt...``),
     so a keyword can be locked to a concrete movie/show before the normal
     IMDb-based release search runs. Returns up to ``limit`` candidates as
-    ``{"title", "year", "imdb_id", "wikidata_qid"}`` dicts, ordered by Wikidata
-    search relevance.
+    ``{"title", "year", "imdb_id", "wikidata_qid", "media_type"}`` dicts, ordered by Wikidata
+    search relevance. Each candidate includes a canonical ``media_type`` so
+    clients can distinguish movies from TV series before the user chooses an
+    IMDb identity.
 
     Returns an empty list when nothing matches or on any upstream error. The
     caller is then expected to ask the user for an explicit IMDb link or ID.
@@ -232,7 +234,7 @@ def _build_movie_candidate_query(search_text: str) -> str:
     escaped = _escape_sparql_string(search_text)
     type_values = " ".join(f"wd:{qid}" for qid in MOVIE_CANDIDATE_TYPE_QIDS)
     return (
-        "SELECT ?item ?itemLabel ?imdb ?year ?ordinal WHERE { "
+        "SELECT ?item ?itemLabel ?imdb ?year ?ordinal ?type WHERE { "
         "SERVICE wikibase:mwapi { "
         'bd:serviceParam wikibase:api "EntitySearch" . '
         f'bd:serviceParam wikibase:endpoint "{WIKIDATA_MWAPI_ENDPOINT}" . '
@@ -272,14 +274,14 @@ def _parse_movie_candidates(payload: dict[str, Any] | None, *, limit: int) -> li
     if not isinstance(bindings, list):
         return []
 
-    candidates: list[dict[str, Any]] = []
-    seen_imdb: set[str] = set()
+    candidates_by_imdb: dict[str, dict[str, Any]] = {}
+    candidate_order: list[str] = []
     for binding in bindings:
         if not isinstance(binding, dict):
             continue
 
         imdb = _binding_value(binding.get("imdb"))
-        if not imdb or not imdb.startswith("tt") or imdb in seen_imdb:
+        if not imdb or not imdb.startswith("tt"):
             continue
 
         qid = _wikidata_qid(_binding_value(binding.get("item")))
@@ -289,19 +291,31 @@ def _parse_movie_candidates(payload: dict[str, Any] | None, *, limit: int) -> li
         if not title or title == qid:
             continue
 
-        seen_imdb.add(imdb)
-        candidates.append(
-            {
+        year = _parse_year(_binding_value(binding.get("year")))
+        type_qid = _wikidata_qid(_binding_value(binding.get("type")))
+        media_type = "tv" if type_qid in TV_TYPE_QIDS else "movie"
+        existing = candidates_by_imdb.get(imdb)
+        if existing is None:
+            candidates_by_imdb[imdb] = {
                 "title": title,
-                "year": _parse_year(_binding_value(binding.get("year"))),
+                "year": year,
                 "imdb_id": imdb,
                 "wikidata_qid": qid,
+                "media_type": media_type,
             }
-        )
-        if len(candidates) >= limit:
-            break
+            candidate_order.append(imdb)
+            continue
 
-    return candidates
+        # Publication dates and class ancestry can yield more than one row for
+        # the same title. Preserve the earliest year and never downgrade a TV
+        # classification if another matching ancestry row is encountered.
+        existing_year = existing.get("year")
+        if year is not None and (existing_year is None or year < existing_year):
+            existing["year"] = year
+        if media_type == "tv":
+            existing["media_type"] = "tv"
+
+    return [candidates_by_imdb[imdb] for imdb in candidate_order[:limit]]
 
 
 def _parse_year(value: str | None) -> int | None:

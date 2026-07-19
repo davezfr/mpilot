@@ -165,12 +165,13 @@ class FakeSequenceClient:
         return FakeWikidataResponse(payload)
 
 
-def _candidate_binding(*, qid, label, imdb, year=None, ordinal=0):
+def _candidate_binding(*, qid, label, imdb, year=None, ordinal=0, type_qid="Q11424"):
     binding = {
         "item": {"value": f"http://www.wikidata.org/entity/{qid}"},
         "itemLabel": {"value": label},
         "imdb": {"value": imdb},
         "ordinal": {"value": str(ordinal)},
+        "type": {"value": f"http://www.wikidata.org/entity/{type_qid}"},
     }
     if year is not None:
         binding["year"] = {"value": str(year)}
@@ -194,8 +195,53 @@ def test_search_movie_candidates_returns_ranked_unique_films(monkeypatch):
     result = asyncio.run(search_movie_candidates("shawshank", _settings()))
 
     assert result == [
-        {"title": "The Shawshank Redemption", "year": 1994, "imdb_id": "tt0111161", "wikidata_qid": "Q172241"},
-        {"title": "The Godfather", "year": 1972, "imdb_id": "tt0068646", "wikidata_qid": "Q47703"},
+        {
+            "title": "The Shawshank Redemption",
+            "year": 1994,
+            "imdb_id": "tt0111161",
+            "wikidata_qid": "Q172241",
+            "media_type": "movie",
+        },
+        {
+            "title": "The Godfather",
+            "year": 1972,
+            "imdb_id": "tt0068646",
+            "wikidata_qid": "Q47703",
+            "media_type": "movie",
+        },
+    ]
+
+
+def test_search_movie_candidates_preserves_movie_and_tv_types(monkeypatch):
+    _reset_fakes()
+    FakeAsyncClient.payload = {
+        "results": {
+            "bindings": [
+                _candidate_binding(
+                    qid="Q191724",
+                    label="The Martian Chronicles",
+                    imdb="tt0080242",
+                    year=1980,
+                    ordinal=0,
+                    type_qid="Q5398426",
+                ),
+                _candidate_binding(
+                    qid="Q189330",
+                    label="The Martian",
+                    imdb="tt3659388",
+                    year=2015,
+                    ordinal=1,
+                ),
+            ]
+        }
+    }
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata.httpx.AsyncClient", FakeAsyncClient)
+
+    result = asyncio.run(search_movie_candidates("The Martian", _settings()))
+
+    assert [(candidate["imdb_id"], candidate["media_type"]) for candidate in result] == [
+        ("tt0080242", "tv"),
+        ("tt3659388", "movie"),
     ]
 
 
@@ -284,6 +330,7 @@ def test_search_movie_candidates_query_uses_entitysearch_and_escapes_quotes(monk
     assert "EntitySearch" in query
     assert 'STRSTARTS(?imdb, "tt")' in query
     assert "wdt:P31/wdt:P279*" in query
+    assert "?ordinal ?type WHERE" in query
     assert '\\"Best\\"' in query
 
 

@@ -204,16 +204,30 @@ def test_cli_handle_prints_title_candidates_for_choose_title():
                 "action": "choose_title",
                 "message": "I found a few possible matches. Reply with the number of the title you mean:",
                 "candidates": [
-                    {"index": 1, "title": "The Hitch-Hiker", "year": 1953, "imdb_id": "tt0045877", "label": "The Hitch-Hiker (1953)"},
-                    {"index": 2, "title": "The Hitch Hiker", "year": 2004, "imdb_id": "tt0430185", "label": "The Hitch Hiker (2004)"},
+                    {
+                        "index": 1,
+                        "title": "The Hitch-Hiker",
+                        "year": 1953,
+                        "imdb_id": "tt0045877",
+                        "media_type": "movie",
+                        "label": "🎬 The Hitch-Hiker (1953)",
+                    },
+                    {
+                        "index": 2,
+                        "title": "The Hitch Hiker",
+                        "year": 2004,
+                        "imdb_id": "tt0430185",
+                        "media_type": "tv",
+                        "label": "📺 The Hitch Hiker (2004)",
+                    },
                 ],
             }
 
     result = _run_cli(["handle", "The Hitch-Hiker"], ChooseTitleClient())
 
     assert result.exit_code == 0
-    assert "1. The Hitch-Hiker (1953)" in result.stdout
-    assert "2. The Hitch Hiker (2004)" in result.stdout
+    assert "1. 🎬 The Hitch-Hiker (1953)" in result.stdout
+    assert "2. 📺 The Hitch Hiker (2004)" in result.stdout
     assert "mpilot acquisition handle tt0045877" in result.stdout
 
 

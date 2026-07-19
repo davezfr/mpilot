@@ -282,9 +282,12 @@ class MovieCandidate(BaseModel):
     title: str
     year: int | None = None
     imdb_id: str
+    media_type: Literal["movie", "tv"] = Field(
+        description="Canonical candidate type used to render a language-neutral movie or TV icon"
+    )
     label: str = Field(
         description=(
-            "Chat-ready one-line label such as 'The Hitch-Hiker (1953)'. Render each "
+            "Chat-ready one-line label such as '🎬 The Hitch-Hiker (1953)'. Render each "
             "candidate as a pick option; when the user picks one, call qbitlarr_handle "
             "again with its imdb_id to get the release choices."
         ),

@@ -28,6 +28,7 @@ from mpilot.acquisition.domain.quality import (
     parse_quality,
 )
 from mpilot.acquisition.domain.choice_table import (
+    format_title_candidate_label,
     render_choice_rich_html,
     render_choice_table,
     render_title_choice_rich_html,
@@ -1066,9 +1067,17 @@ def _to_movie_candidates(candidates: list[dict]) -> list[MovieCandidate]:
     for index, candidate in enumerate(candidates, start=1):
         title = candidate["title"]
         year = candidate.get("year")
-        label = f"{title} ({year})" if year else title
+        media_type = candidate["media_type"]
+        label = format_title_candidate_label(title=title, year=year, media_type=media_type)
         movie_candidates.append(
-            MovieCandidate(index=index, title=title, year=year, imdb_id=candidate["imdb_id"], label=label)
+            MovieCandidate(
+                index=index,
+                title=title,
+                year=year,
+                imdb_id=candidate["imdb_id"],
+                media_type=media_type,
+                label=label,
+            )
         )
     return movie_candidates
 

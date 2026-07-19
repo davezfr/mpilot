@@ -9,6 +9,7 @@ SEEDERS_EMOJI = "🧲"
 SIZE_EMOJI = "💾"
 MISSING = "—"
 DEFAULT_RESOLUTION = "1080p"
+MEDIA_TYPE_EMOJI = {"movie": "🎬", "tv": "📺"}
 
 
 def render_choice_table(results: list[ManualSearchResult]) -> str:
@@ -130,10 +131,11 @@ def render_title_choice_rich_html(message: str, candidates: list[MovieCandidate]
         "</tr>"
     ]
     for candidate in candidates:
+        media_type_emoji = MEDIA_TYPE_EMOJI[candidate.media_type]
         rows.append(
             "<tr>"
             f'<td align="right"><b>{candidate.index}</b></td>'
-            f"<td>{escape(candidate.title)}</td>"
+            f"<td>{media_type_emoji} {escape(candidate.title)}</td>"
             f'<td align="right">{escape(str(candidate.year)) if candidate.year else MISSING}</td>'
             "</tr>"
         )
@@ -144,6 +146,12 @@ def render_title_choice_rich_html(message: str, candidates: list[MovieCandidate]
         f"{''.join(rows)}"
         "</table>"
     )
+
+
+def format_title_candidate_label(*, title: str, year: int | None, media_type: str) -> str:
+    """Return the compact language-neutral label used for title identity choices."""
+    title_with_year = f"{title} ({year})" if year else title
+    return f"{MEDIA_TYPE_EMOJI[media_type]} {title_with_year}"
 
 
 def _center(value: str, width: int) -> str:

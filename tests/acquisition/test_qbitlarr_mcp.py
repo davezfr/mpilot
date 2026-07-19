@@ -169,13 +169,27 @@ def test_agent_handle_payload_for_title_choices_uses_label_only_choices():
         "status": "success",
         "action": "choose_title",
         "message": "I found a few possible matches. Reply with the number of the title you mean:",
-        "choices_table": "1. Parasite (2019)\n2. Parasite (1982)",
-        "choice_display": "I found a few possible matches.\n\n```text\n1. Parasite (2019)\n```",
+        "choices_table": "1. 🎬 Parasite (2019)\n2. 📺 Parasite (1982)",
+        "choice_display": "I found a few possible matches.\n\n```text\n1. 🎬 Parasite (2019)\n```",
         "choice_buttons": [{"index": 1, "text": "1", "value": "1"}],
         "choice_rich_message": {"format": "telegram-html", "html": "<table></table>"},
         "candidates": [
-            {"index": 1, "title": "Parasite", "year": 2019, "imdb_id": "tt6751668", "label": "Parasite (2019)"},
-            {"index": 2, "title": "Parasite", "year": 1982, "imdb_id": "tt0084472", "label": "Parasite (1982)"},
+            {
+                "index": 1,
+                "title": "Parasite",
+                "year": 2019,
+                "imdb_id": "tt6751668",
+                "media_type": "movie",
+                "label": "🎬 Parasite (2019)",
+            },
+            {
+                "index": 2,
+                "title": "Parasite",
+                "year": 1982,
+                "imdb_id": "tt0084472",
+                "media_type": "tv",
+                "label": "📺 Parasite (1982)",
+            },
         ],
     }
 
@@ -187,7 +201,7 @@ def test_agent_handle_payload_for_title_choices_uses_label_only_choices():
     assert "choice_rich_message" not in agent_payload
     assert agent_payload["agent_clarify"] == {
         "question": "Choose a title:",
-        "display_table": "1. Parasite (2019)\n2. Parasite (1982)",
+        "display_table": "1. 🎬 Parasite (2019)\n2. 📺 Parasite (1982)",
         "choices": ["1", "2"],
         "response_mapping": [
             {"choice": "1", "response": "1", "index": 1},
