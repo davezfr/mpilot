@@ -21,6 +21,11 @@ from tests.subtitles.test_jobs import sample_request
 
 
 class JobNotificationTests(unittest.TestCase):
+    def test_missing_title_fallback_follows_notification_language(self):
+        self.assertEqual(notifications._title_for_watch({"language": "en"}), "your subtitle job")
+        self.assertEqual(notifications._title_for_watch({"language": "fr"}), "votre tâche de sous-titres")
+        self.assertEqual(notifications._title_for_watch({"language": "zh"}), "字幕任务")
+
     def test_notification_store_deduplicates_by_job_and_target(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = JobNotificationStore(Path(tmp) / "watches.json")

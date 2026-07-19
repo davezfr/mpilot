@@ -762,6 +762,11 @@ def _title_for_watch(watch: Dict[str, Any]) -> str:
     title = _string_or_none(watch.get("title"))
     if title:
         return title
+    language = _language_for_watch(watch)
+    if language == "zh":
+        return "字幕任务"
+    if language == "fr":
+        return "votre tâche de sous-titres"
     return "your subtitle job"
 
 
