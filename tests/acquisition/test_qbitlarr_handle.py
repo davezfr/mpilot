@@ -622,7 +622,7 @@ def test_handle_imdb_id_auto_downloads_tv_to_tv_path(monkeypatch, tmp_path):
         return {
             "imdb_id": imdb_id,
             "canonical_title": "Example Show",
-            "year": 2025,
+            "year": None,
             "media_type": "tv",
             "metadata_source": "wikidata",
         }

@@ -160,14 +160,14 @@ def _parse_imdb_metadata(payload: dict[str, Any] | None, *, imdb_id: str) -> dic
         if type_qid in TV_TYPE_QIDS:
             media_type = "tv"
 
-    if not title or not years:
+    if not title or (media_type == "movie" and not years):
         return None
     aliases.discard(title)
     return {
         "imdb_id": imdb_id,
         "canonical_title": title,
         "title_aliases": sorted(aliases, key=str.casefold),
-        "year": min(years),
+        "year": min(years) if years else None,
         "media_type": media_type,
         "metadata_source": "wikidata",
         "wikidata_qid": qid,

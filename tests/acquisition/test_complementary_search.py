@@ -174,6 +174,37 @@ def test_resolve_imdb_metadata_builds_canonical_contract(monkeypatch, imdb_id, t
     }
 
 
+def test_resolve_imdb_metadata_allows_tv_series_without_release_year(monkeypatch):
+    async def fake_run(query, settings, **kwargs):
+        assert 'wdt:P345 "tt22202452"' in query
+        assert kwargs == {"raise_on_error": True}
+        return {
+            "results": {
+                "bindings": [
+                    {
+                        "item": {"value": "http://www.wikidata.org/entity/Q122155720"},
+                        "itemLabel": {"value": "Pluribus"},
+                        "type": {"value": "http://www.wikidata.org/entity/Q5398426"},
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setattr("mpilot.acquisition.services.wikidata._run_sparql", fake_run)
+
+    metadata = asyncio.run(resolve_imdb_metadata("tt22202452", SimpleNamespace()))
+
+    assert metadata == {
+        "imdb_id": "tt22202452",
+        "canonical_title": "Pluribus",
+        "title_aliases": [],
+        "year": None,
+        "media_type": "tv",
+        "metadata_source": "wikidata",
+        "wikidata_qid": "Q122155720",
+    }
+
+
 @pytest.mark.parametrize("mode", ["auto", "manual", "confirm"])
 def test_zero_raw_imdb_results_returns_two_stage_complementary_action(monkeypatch, tmp_path, mode):
     async def empty_search(request, settings):
